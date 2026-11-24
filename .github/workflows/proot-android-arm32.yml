@@ -54,8 +54,6 @@ jobs:
         working-directory: proot-rs-src
         env:
           CARGO_BUILD_TARGET: arm-linux-androideabi
-          CC_arm_linux_androideabi: ${{ env.ANDROID_NDK_HOME }}/toolchains/llvm/prebuilt/linux-x86_64/bin/armv7a-linux-androideabi26-clang
-          AR_arm_linux_androideabi: ${{ env.ANDROID_NDK_HOME }}/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-ar
         run: |
           set -euxo pipefail
           NDK_BIN="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin"
