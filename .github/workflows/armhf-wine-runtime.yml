@@ -86,6 +86,7 @@ jobs:
           #!/bin/sh
           set -eu
           export HOME=/home/saji
+          export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
           export DISPLAY=:0
           export WINEPREFIX=/home/saji/.wine
           export WINEARCH=win32
