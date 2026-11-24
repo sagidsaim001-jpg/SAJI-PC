@@ -60,9 +60,17 @@ jobs:
           export CC_arm_linux_androideabi="$NDK_BIN/armv7a-linux-androideabi26-clang"
           export AR_arm_linux_androideabi="$NDK_BIN/llvm-ar"
           export CFLAGS_arm_linux_androideabi="--target=armv7a-linux-androideabi26"
+          # Rust's legacy ARM Android target asks for libgcc. Android NDK ships
+          # compiler-rt builtins instead, so provide the compatible archive alias.
+          BUILTINS="$(find "$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64" \
+            -name 'libclang_rt.builtins-arm-android.a' -print -quit)"
+          test -n "$BUILTINS"
+          mkdir -p ndk-compat
+          ln -sf "$BUILTINS" ndk-compat/libgcc.a
+          export RUSTFLAGS="-L native=$PWD/ndk-compat"
           # Build the no_std loader using the upstream pinned nightly, embed it in PRoot,
           # then build the actual Android ARM32 PRoot executable directly with Cargo.
-          RUSTFLAGS="-C panic=abort -C link-self-contained=no" \
+          RUSTFLAGS="-C panic=abort -C link-self-contained=no -L native=$PWD/ndk-compat" \
             cargo +nightly-2021-03-24 build --locked --bin=loader-shim \
             --features=build-binary --target=arm-linux-androideabi --release
           install -m 0755 target/arm-linux-androideabi/release/loader-shim \
