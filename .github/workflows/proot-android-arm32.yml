@@ -60,19 +60,26 @@ jobs:
           export CC_arm_linux_androideabi="$NDK_BIN/armv7a-linux-androideabi26-clang"
           export AR_arm_linux_androideabi="$NDK_BIN/llvm-ar"
           export CFLAGS_arm_linux_androideabi="--target=armv7a-linux-androideabi26"
-          # Use the NDK's own ARM32 libgcc linker script. For 32-bit ARM it
-          # orders LLVM libunwind before libgcc, which is required for EH symbols.
+          # NDK ARM32 requires LLVM libunwind plus compiler-rt builtins.
+          # The SDK may not expose a standalone libgcc linker script, so create
+          # the same ordered group under the legacy name Rust's 2021 target asks for.
           NDK_SYSROOT="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/sysroot"
-          LIBGCC="$(find "$NDK_SYSROOT/usr/lib" -path '*/arm-linux-androideabi/*/libgcc.a' \
-            -print -quit)"
-          test -n "$LIBGCC"
-          NDK_ARM_LIB="$(dirname "$LIBGCC")"
-          find "$NDK_ARM_LIB" -maxdepth 1 \( -name 'libgcc*' -o -name 'libunwind*' \) -type f -print
-          file "$LIBGCC"
-          export RUSTFLAGS="-L native=$NDK_ARM_LIB"
+          NDK_ROOT="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64"
+          LIBUNWIND="$(find "$NDK_SYSROOT/usr/lib/arm-linux-androideabi" \
+            -name 'libunwind.a' -print -quit)"
+          if [ -z "$LIBUNWIND" ]; then
+            LIBUNWIND="$(find "$NDK_ROOT" -name 'libunwind.a' -print -quit)"
+          fi
+          BUILTINS="$(find "$NDK_ROOT" -name 'libclang_rt.builtins-arm-android.a' -print -quit)"
+          test -n "$LIBUNWIND"
+          test -n "$BUILTINS"
+          mkdir -p ndk-compat
+          printf 'INPUT ( %s %s )\n' "$LIBUNWIND" "$BUILTINS" > ndk-compat/libgcc.a
+          cat ndk-compat/libgcc.a
+          export RUSTFLAGS="-L native=$PWD/ndk-compat"
           # Build the no_std loader using the upstream pinned nightly, embed it in PRoot,
           # then build the actual Android ARM32 PRoot executable directly with Cargo.
-          RUSTFLAGS="-C panic=abort -C link-self-contained=no -L native=$NDK_ARM_LIB" \
+          RUSTFLAGS="-C panic=abort -C link-self-contained=no -L native=$PWD/ndk-compat" \
             cargo +nightly-2021-03-24 build --locked --bin=loader-shim \
             --features=build-binary --target=arm-linux-androideabi --release
           install -m 0755 target/arm-linux-androideabi/release/loader-shim \
