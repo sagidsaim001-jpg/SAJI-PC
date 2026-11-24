@@ -38,6 +38,7 @@ class MainActivity : Activity() {
     private lateinit var desktopView: WebView
     private lateinit var menuScroll: ScrollView
     private lateinit var installButton: Button
+    private lateinit var testRuntimeButton: Button
     private lateinit var launchButton: Button
     private lateinit var installedAppsButton: Button
     private lateinit var stopButton: Button
@@ -45,6 +46,7 @@ class MainActivity : Activity() {
 
     private var selectedExeFile: File? = null
     private var selectedExeMachine: Int? = null
+    private var runtimeTestPassed = false
     private var runtimeProcess: Process? = null
     private val worker: ExecutorService = Executors.newSingleThreadExecutor()
     private val processLog = StringBuilder()
@@ -102,6 +104,10 @@ class MainActivity : Activity() {
             gravity = Gravity.CENTER
             setPadding(dp(8), dp(8), dp(8), dp(10))
         }
+        testRuntimeButton = makeButton("Verify Box86 + Wine Runtime") {
+            verifyRuntime()
+        }
+        testRuntimeButton.isEnabled = false
         launchButton = makeButton("Launch in Desktop") {
             launchWindowsExe()
         }
@@ -134,6 +140,7 @@ class MainActivity : Activity() {
         panel.addView(installButton, fullWidthParams())
         panel.addView(selectButton, fullWidthParams())
         panel.addView(selectedExeLabel)
+        panel.addView(testRuntimeButton, fullWidthParams())
         panel.addView(launchButton, fullWidthParams())
         panel.addView(installedAppsButton, fullWidthParams())
         panel.addView(stopButton, fullWidthParams())
@@ -193,7 +200,8 @@ class MainActivity : Activity() {
             nativeEngineStatus() + "\nWindows runtime not installed"
         }
         installButton.isEnabled = runtimeProcess?.isAlive != true
-        launchButton.isEnabled = ready &&
+        testRuntimeButton.isEnabled = ready && runtimeProcess?.isAlive != true
+        launchButton.isEnabled = ready && runtimeTestPassed &&
             selectedExeFile?.isFile == true &&
             selectedExeMachine == 0x014c &&
             runtimeProcess?.isAlive != true
@@ -208,6 +216,7 @@ class MainActivity : Activity() {
         }
         installButton.isEnabled = false
         launchButton.isEnabled = false
+        runtimeTestPassed = false
         runtimeStatus.text = "Runtime manifest check ho raha hai…"
         worker.execute {
             try {
@@ -224,6 +233,92 @@ class MainActivity : Activity() {
                     runtimeStatus.text = "Runtime install failed: ${error.message ?: "unknown error"}"
                     refreshRuntimeState()
                     Toast.makeText(this, "Runtime install failed. Details status mein hain.", Toast.LENGTH_LONG).show()
+                }
+            }
+        }
+    }
+
+    private fun verifyRuntime() {
+        if (!runtimeManager.isReady()) {
+            runtimeTestPassed = false
+            refreshRuntimeState()
+            Toast.makeText(this, "Pehle runtime install karein.", Toast.LENGTH_LONG).show()
+            return
+        }
+        testRuntimeButton.isEnabled = false
+        launchButton.isEnabled = false
+        runtimeTestPassed = false
+        runtimeStatus.text = "Phone par PRoot + ARMHF + Box86 + Wine32 test ho raha hai…"
+
+        worker.execute {
+            var process: Process? = null
+            val output = StringBuilder()
+            try {
+                val proot = runtimeManager.prootBinary
+                val rootfs = runtimeManager.rootfsDir
+                val command = arrayListOf(
+                    proot.absolutePath,
+                    "--kill-on-exit",
+                    "--rootfs=${rootfs.absolutePath}",
+                    "--bind=/dev:/dev",
+                    "--bind=/proc:/proc",
+                    "--cwd=/",
+                    "/usr/local/bin/box86",
+                    "/usr/lib/wine/wine",
+                    "--version"
+                )
+                val builder = ProcessBuilder(command).redirectErrorStream(true)
+                builder.environment()["HOME"] = "/home/saji"
+                builder.environment()["WINEPREFIX"] = "/home/saji/.wine"
+                builder.environment()["WINEARCH"] = "win32"
+                builder.environment()["BOX86_LD_LIBRARY_PATH"] =
+                    "/usr/lib/i386-linux-gnu:/lib/i386-linux-gnu:/usr/lib/wine"
+                builder.environment()["BOX86_PATH"] = "/usr/lib/wine"
+                builder.environment()["BOX86_NOBANNER"] = "1"
+                process = builder.start()
+                val activeProcess = process
+                val reader = Thread {
+                    try {
+                        BufferedReader(InputStreamReader(activeProcess.inputStream)).use { stream ->
+                            while (true) {
+                                val line = stream.readLine() ?: break
+                                synchronized(output) {
+                                    if (output.length > 5000) output.delete(0, 1500)
+                                    output.append(line).append('\\n')
+                                }
+                            }
+                        }
+                    } catch (_: Exception) {
+                    }
+                }
+                reader.start()
+                val finished = activeProcess.waitFor(45, java.util.concurrent.TimeUnit.SECONDS)
+                if (!finished) {
+                    activeProcess.destroyForcibly()
+                    throw IllegalStateException("PRoot/Wine test 45 seconds mein complete nahi hua.")
+                }
+                reader.join(2000)
+                val resultText = synchronized(output) { output.toString() }.trim()
+                if (activeProcess.exitValue() != 0 || !resultText.contains("wine-", ignoreCase = true)) {
+                    throw IllegalStateException(
+                        "Wine32 test fail hua (exit ${activeProcess.exitValue()}): " +
+                            resultText.takeLast(1000)
+                    )
+                }
+                runOnUiThread {
+                    runtimeTestPassed = true
+                    runtimeStatus.text = "Device runtime test PASS\\n$resultText\\nAb 32-bit Windows EXE launch kar sakte hain."
+                    refreshRuntimeState()
+                    Toast.makeText(this, "PRoot + Box86 + Wine32 test PASS.", Toast.LENGTH_LONG).show()
+                }
+            } catch (error: Exception) {
+                process?.destroyForcibly()
+                val detail = synchronized(output) { output.toString() }.takeLast(1000)
+                runOnUiThread {
+                    runtimeTestPassed = false
+                    runtimeStatus.text = "Device runtime test FAIL\\n${error.message ?: "unknown error"}\\n$detail"
+                    refreshRuntimeState()
+                    Toast.makeText(this, "Is phone par runtime verification fail hui. Details status mein hain.", Toast.LENGTH_LONG).show()
                 }
             }
         }
