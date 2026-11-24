@@ -54,18 +54,28 @@ jobs:
         working-directory: proot-rs-src
         env:
           CARGO_BUILD_TARGET: arm-linux-androideabi
+          CC_arm_linux_androideabi: ${{ env.ANDROID_NDK_HOME }}/toolchains/llvm/prebuilt/linux-x86_64/bin/armv7a-linux-androideabi26-clang
+          AR_arm_linux_androideabi: ${{ env.ANDROID_NDK_HOME }}/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-ar
         run: |
-          # This upstream repo pins a 2021 nightly for unstable language features.
-          # Build the cargo-make driver with stable, then let it invoke the pinned nightly.
-          env -u CARGO_BUILD_TARGET RUSTUP_TOOLCHAIN=stable cargo install cargo-make --locked
+          set -euxo pipefail
           NDK_BIN="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin"
           export CC_arm_linux_androideabi="$NDK_BIN/armv7a-linux-androideabi26-clang"
           export AR_arm_linux_androideabi="$NDK_BIN/llvm-ar"
           export CFLAGS_arm_linux_androideabi="--target=armv7a-linux-androideabi26"
-          cargo make build --profile=production
+          # Build the no_std loader using the upstream pinned nightly, embed it in PRoot,
+          # then build the actual Android ARM32 PRoot executable directly with Cargo.
+          RUSTFLAGS="-C panic=abort -C link-self-contained=no" \
+            cargo +nightly-2021-03-24 build --locked --bin=loader-shim \
+            --features=build-binary --target=arm-linux-androideabi --release
+          install -m 0755 target/arm-linux-androideabi/release/loader-shim \
+            proot-rs/src/kernel/execve/loader-shim
+          cargo +nightly-2021-03-24 build --locked --bin=proot-rs \
+            --target=arm-linux-androideabi --release
           mkdir -p ../runtime-artifact
-          install -m 0755 target/arm-linux-androideabi/release/proot-rs ../runtime-artifact/libproot.so
-          install -m 0755 target/arm-linux-androideabi/release/loader-shim ../runtime-artifact/libproot-loader.so
+          install -m 0755 target/arm-linux-androideabi/release/proot-rs \
+            ../runtime-artifact/libproot.so
+          install -m 0755 target/arm-linux-androideabi/release/loader-shim \
+            ../runtime-artifact/libproot-loader.so
 
       - name: Verify Android ARM32 PRoot artifacts
         run: |
