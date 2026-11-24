@@ -111,6 +111,10 @@ jobs:
           exit "$WINE_EXIT"
           EOF
           sudo chmod 0755 runtime-rootfs/usr/local/bin/saji-desktop
+          # Android app UID is not root inside PRoot. Give its Wine prefix a writable home.
+          sudo mkdir -p runtime-rootfs/home/saji runtime-rootfs/tmp
+          sudo chmod 0777 runtime-rootfs/home/saji
+          sudo chmod 1777 runtime-rootfs/tmp
           sudo rm -f runtime-rootfs/usr/bin/qemu-arm-static
           sudo chroot runtime-rootfs dpkg-query -W -f='${binary:Package} ${Version} ${Architecture}\n' | sort | sudo tee runtime-rootfs/SAJI-PC-PACKAGES.txt
 
