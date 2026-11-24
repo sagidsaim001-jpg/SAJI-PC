@@ -111,6 +111,8 @@ class RuntimeManager(context: Context) {
         artifact: JSONObject?,
         progress: (String) -> Unit
     ) {
+        val bundleDir = File(runtimeDir, "artifact-bundle")
+        deleteRecursively(bundleDir)
         if (artifact != null) {
             verifySha256(artifactZip, artifact.optString("digest").removePrefix("sha256:"))
         }
@@ -277,9 +279,11 @@ class RuntimeManager(context: Context) {
                     zip.closeEntry()
                     continue
                 }
-                val name = entry.name
-                require(name in allowed) {
-                    "Runtime artifact mein unknown file mili: $name"
+                val archivePath = entry.name.trimEnd('/')
+                val name = archivePath.substringAfterLast('/')
+                require(name in allowed &&
+                    (archivePath == name || archivePath == "runtime-bundle/$name")) {
+                    "Runtime artifact mein unknown file mili: $archivePath"
                 }
                 require(found.add(name)) {
                     "Runtime artifact mein duplicate file hai: $name"
