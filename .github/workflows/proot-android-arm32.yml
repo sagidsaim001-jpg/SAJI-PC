@@ -60,23 +60,15 @@ jobs:
           export CC_arm_linux_androideabi="$NDK_BIN/armv7a-linux-androideabi26-clang"
           export AR_arm_linux_androideabi="$NDK_BIN/llvm-ar"
           export CFLAGS_arm_linux_androideabi="--target=armv7a-linux-androideabi26"
-          # NDK ARM32 requires LLVM libunwind plus compiler-rt builtins.
-          # The SDK may not expose a standalone libgcc linker script, so create
-          # the same ordered group under the legacy name Rust's 2021 target asks for.
-          NDK_SYSROOT="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/sysroot"
+          # Rust's default unwind panic runtime pulls in ABI-specific unwinder
+          # symbols. This PRoot build uses abort-on-panic, so only ARM compiler
+          # builtins are required from the NDK.
           NDK_ROOT="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64"
-          LIBUNWIND="$(find "$NDK_SYSROOT/usr/lib/arm-linux-androideabi" \
-            -name 'libunwind.a' -print -quit)"
-          if [ -z "$LIBUNWIND" ]; then
-            LIBUNWIND="$(find "$NDK_ROOT" -name 'libunwind.a' -print -quit)"
-          fi
           BUILTINS="$(find "$NDK_ROOT" -name 'libclang_rt.builtins-arm-android.a' -print -quit)"
-          test -n "$LIBUNWIND"
           test -n "$BUILTINS"
           mkdir -p ndk-compat
-          printf 'INPUT ( %s %s )\n' "$LIBUNWIND" "$BUILTINS" > ndk-compat/libgcc.a
-          cat ndk-compat/libgcc.a
-          export RUSTFLAGS="-L native=$PWD/ndk-compat"
+          ln -sf "$BUILTINS" ndk-compat/libgcc.a
+          export RUSTFLAGS="-C panic=abort -L native=$PWD/ndk-compat"
           # Build the no_std loader using the upstream pinned nightly, embed it in PRoot,
           # then build the actual Android ARM32 PRoot executable directly with Cargo.
           RUSTFLAGS="-C panic=abort -C link-self-contained=no -L native=$PWD/ndk-compat" \
