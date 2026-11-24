@@ -46,10 +46,12 @@ A practical 32-bit x86 Windows compatibility stack on 32-bit ARM Android needs a
 
 ## Current status
 
+A dedicated GitHub Actions workflow now builds a pinned upstream Box86 revision for Android `armeabi-v7a` using the Android NDK. This is a compile probe only: a successful binary build does not yet provide the Linux root filesystem, Wine, or EXE execution.
+
 - Android shell: implemented; CI build still being validated.
 - EXE selection and MZ signature check: implemented, not device-tested yet.
-- ARMHF rootfs: not integrated.
-- Box86: not integrated.
+- ARMHF rootfs: not integrated; Android Bionic and Debian armhf/glibc require a deliberate compatibility boundary.
+- Box86: dedicated Android ARM32 NDK cross-build workflow added; native binary build is pending CI verification and is not yet integrated into the APK.
 - 32-bit Wine: not integrated.
 - Windows EXE execution: not available.
 - Device installation test: not performed by CI; requires the APK to be installed and exercised on the user's Infinix device.
