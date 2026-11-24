@@ -36,6 +36,7 @@ jobs:
           git clone https://github.com/ptitSeb/box86.git box86-src
           git -C box86-src checkout bb716a2a6576cc06da811bf55e31e2f6f03b7596
           git -C box86-src rev-parse HEAD
+          patch -d box86-src -p1 < runtime/patches/box86-android-bionic.patch
 
       - name: Configure Box86 for Android ARM32
         run: |
