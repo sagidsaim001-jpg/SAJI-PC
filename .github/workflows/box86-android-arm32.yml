@@ -54,7 +54,8 @@ jobs:
             -DNOGIT=ON \
             -DNO_CONF_INSTALL=ON \
             -DNO_LIB_INSTALL=ON \
-            -DCMAKE_BUILD_TYPE=Release
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_C_FLAGS="-DSHT_CHECKSUM=0x6ffffff8"
 
       - name: Compile Box86
         run: cmake --build build/box86 --parallel 2
