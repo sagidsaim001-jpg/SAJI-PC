@@ -279,8 +279,8 @@ class MainActivity : Activity() {
                     "/usr/lib/i386-linux-gnu:/lib/i386-linux-gnu:/usr/lib/wine"
                 builder.environment()["BOX86_PATH"] = "/usr/lib/wine"
                 builder.environment()["BOX86_NOBANNER"] = "1"
-                process = builder.start()
-                val activeProcess = process
+                val activeProcess = builder.start()
+                process = activeProcess
                 val reader = Thread {
                     try {
                         BufferedReader(InputStreamReader(activeProcess.inputStream)).use { stream ->
