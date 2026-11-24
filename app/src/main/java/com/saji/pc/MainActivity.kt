@@ -57,6 +57,7 @@ class MainActivity : Activity() {
         runtimeManager = RuntimeManager(this)
         buildInterface()
         refreshRuntimeState()
+        if (runtimeManager.isReady()) verifyRuntime()
     }
 
     private fun buildInterface() {
