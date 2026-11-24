@@ -14,7 +14,7 @@ permissions:
 jobs:
   box86-android-arm32:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 60
     steps:
       - name: Checkout SAJI PC
         uses: actions/checkout@v4
@@ -31,13 +31,18 @@ jobs:
           "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "ndk;27.2.12479018" "cmake;3.22.1"
           echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/27.2.12479018" >> "$GITHUB_ENV"
 
-      - name: Fetch pinned Box86 source
+      - name: Fetch pinned Box86 source and apply Android math compatibility
         run: |
           git clone https://github.com/ptitSeb/box86.git box86-src
           git -C box86-src checkout bb716a2a6576cc06da811bf55e31e2f6f03b7596
           git -C box86-src rev-parse HEAD
-          sed -i 's/isinff(/isinf(/g' box86-src/src/emu/x86run0f.c
-          ! grep -n 'isinff(' box86-src/src/emu/x86run0f.c
+          # Android's Bionic math headers expose isnan/isinf, not the glibc-only *f aliases.
+          grep -RIlE '\\b(isnanf|isinff)[[:space:]]*\\(' box86-src/src --include='*.c' \
+            | xargs -r sed -i -E 's/\\bisnanf[[:space:]]*\\(/isnan(/g; s/\\bisinff[[:space:]]*\\(/isinf(/g'
+          if grep -RInE '\\b(isnanf|isinff)[[:space:]]*\\(' box86-src/src --include='*.c'; then
+            echo "Unpatched Android math aliases remain"
+            exit 1
+          fi
 
       - name: Configure Box86 for Android ARM32
         run: |
@@ -56,10 +61,10 @@ jobs:
 
       - name: Locate and verify Box86 binary
         run: |
-          find build/box86 -type f -name box86 -print
           BOX86_BIN="$(find build/box86 -type f -name box86 -perm -111 | head -n 1)"
           test -n "$BOX86_BIN"
           file "$BOX86_BIN"
+          readelf -h "$BOX86_BIN" | grep -E 'Class:|Machine:'
           mkdir -p runtime-artifact
           cp "$BOX86_BIN" runtime-artifact/box86
           sha256sum runtime-artifact/box86
