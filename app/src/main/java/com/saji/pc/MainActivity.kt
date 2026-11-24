@@ -1,6 +1,7 @@
 package com.saji.pc
 
 import android.app.Activity
+import android.app.AlertDialog
 import android.content.Intent
 import android.database.Cursor
 import android.graphics.Color
@@ -38,6 +39,7 @@ class MainActivity : Activity() {
     private lateinit var menuScroll: ScrollView
     private lateinit var installButton: Button
     private lateinit var launchButton: Button
+    private lateinit var installedAppsButton: Button
     private lateinit var stopButton: Button
     private lateinit var hideDesktopButton: Button
 
@@ -104,6 +106,10 @@ class MainActivity : Activity() {
             launchWindowsExe()
         }
         launchButton.isEnabled = false
+        installedAppsButton = makeButton("Browse Installed Windows Apps") {
+            showInstalledApps()
+        }
+        installedAppsButton.isEnabled = false
         stopButton = makeButton("Stop Desktop Session") {
             stopDesktopSession()
         }
@@ -129,6 +135,7 @@ class MainActivity : Activity() {
         panel.addView(selectButton, fullWidthParams())
         panel.addView(selectedExeLabel)
         panel.addView(launchButton, fullWidthParams())
+        panel.addView(installedAppsButton, fullWidthParams())
         panel.addView(stopButton, fullWidthParams())
         panel.addView(note)
         menuScroll.addView(panel)
@@ -190,6 +197,7 @@ class MainActivity : Activity() {
             selectedExeFile?.isFile == true &&
             selectedExeMachine == 0x014c &&
             runtimeProcess?.isAlive != true
+        installedAppsButton.isEnabled = ready && runtimeProcess?.isAlive != true
         stopButton.isEnabled = runtimeProcess?.isAlive == true
     }
 
@@ -249,19 +257,10 @@ class MainActivity : Activity() {
                 FileOutputStream(target).use { output -> input.copyTo(output) }
             }
 
-            val pe = inspectPe(target)
-            selectedExeFile = if (pe.isWindowsPe && pe.machine == 0x014c) target else null
-            selectedExeMachine = if (pe.isWindowsPe) pe.machine else null
-            selectedExeLabel.text = when {
-                !pe.isWindowsPe -> "$name\nValid Windows PE file nahi hai."
-                pe.machine == 0x014c -> "$name\nWindows x86 (32-bit) EXE detected\nPrivate app storage mein saved"
-                pe.machine == 0x8664 -> "$name\nWindows x64 EXE detected\nARM32 target par supported nahi"
-                else -> "$name\nPE machine 0x" + pe.machine.toString(16) + "\nSupported x86 target nahi"
-            }
-            refreshRuntimeState()
+            selectExecutable(target, name, "Private app storage mein saved")
             Toast.makeText(
                 this,
-                if (pe.isWindowsPe) "EXE import complete." else "Windows PE header nahi mila.",
+                if (selectedExeMachine == 0x014c) "EXE import complete." else "File valid 32-bit Windows EXE nahi hai.",
                 Toast.LENGTH_LONG
             ).show()
         } catch (error: Exception) {
@@ -270,6 +269,62 @@ class MainActivity : Activity() {
             selectedExeLabel.text = "File import failed: ${error.message ?: "unknown error"}"
             refreshRuntimeState()
             Toast.makeText(this, "Selected file import nahi ho saki.", Toast.LENGTH_LONG).show()
+        }
+    }
+
+    private fun selectExecutable(file: File, displayName: String, sourceNote: String) {
+        val pe = inspectPe(file)
+        selectedExeFile = if (pe.isWindowsPe && pe.machine == 0x014c) file else null
+        selectedExeMachine = if (pe.isWindowsPe) pe.machine else null
+        selectedExeLabel.text = when {
+            !pe.isWindowsPe -> "$displayName\\nValid Windows PE file nahi hai."
+            pe.machine == 0x014c -> "$displayName\\nWindows x86 (32-bit) EXE detected\\n$sourceNote"
+            pe.machine == 0x8664 -> "$displayName\\nWindows x64 EXE detected\\nARM32 target par supported nahi"
+            else -> "$displayName\\nPE machine 0x" + pe.machine.toString(16) + "\\nSupported x86 target nahi"
+        }
+        refreshRuntimeState()
+    }
+
+    private fun showInstalledApps() {
+        if (!runtimeManager.isReady()) {
+            Toast.makeText(this, "Pehle Windows runtime install karein.", Toast.LENGTH_LONG).show()
+            return
+        }
+        val driveC = File(runtimeManager.rootfsDir, "home/saji/.wine/drive_c")
+        val searchRoots = listOf(
+            File(driveC, "Program Files"),
+            File(driveC, "Program Files (x86)"),
+            File(driveC, "users")
+        )
+        val executables = mutableListOf<File>()
+        searchRoots.forEach { root -> collectExecutables(root, 0, executables) }
+        if (executables.isEmpty()) {
+            Toast.makeText(this, "Wine prefix mein installed EXE nahi mila. Pehle installer run karein.", Toast.LENGTH_LONG).show()
+            return
+        }
+        val labels = executables.map { file ->
+            file.relativeTo(driveC).invariantSeparatorsPath
+        }.toTypedArray()
+        AlertDialog.Builder(this)
+            .setTitle("Installed Windows Apps")
+            .setItems(labels) { _, which ->
+                selectExecutable(executables[which], labels[which], "Wine prefix mein installed")
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
+    }
+
+    private fun collectExecutables(directory: File, depth: Int, output: MutableList<File>) {
+        if (depth > 7 || output.size >= 250 || !directory.isDirectory) return
+        val children = directory.listFiles() ?: return
+        children.sortedBy { it.name.lowercase() }.forEach { child ->
+            if (output.size >= 250) return
+            if (child.isDirectory) {
+                collectExecutables(child, depth + 1, output)
+            } else if (child.isFile && child.extension.equals("exe", ignoreCase = true) &&
+                !child.name.startsWith("unins", ignoreCase = true)) {
+                output.add(child)
+            }
         }
     }
 
@@ -324,6 +379,17 @@ class MainActivity : Activity() {
             val proot = runtimeManager.prootBinary
             val rootfs = runtimeManager.rootfsDir
             val windowsDir = File(filesDir, "windows")
+            val rootPath = rootfs.canonicalFile.toPath()
+            val exePath = exe.canonicalFile.toPath()
+            val guestExePath = if (exePath.startsWith(rootPath)) {
+                "/" + rootPath.relativize(exePath).toString().replace(File.separatorChar, '/')
+            } else {
+                require(exePath.startsWith(windowsDir.canonicalFile.toPath())) {
+                    "Selected EXE PRoot guest filesystem ke andar nahi hai."
+                }
+                "/mnt/saji/" + windowsDir.canonicalFile.toPath()
+                    .relativize(exePath).toString().replace(File.separatorChar, '/')
+            }
             val command = arrayListOf(
                 proot.absolutePath,
                 "--rootfs", rootfs.absolutePath,
@@ -332,7 +398,7 @@ class MainActivity : Activity() {
                 "--bind", windowsDir.absolutePath + ":/mnt/saji",
                 "--cwd", "/",
                 "/usr/local/bin/saji-desktop",
-                "/mnt/saji/" + exe.name
+                guestExePath
             )
             processLog.setLength(0)
             val builder = ProcessBuilder(command).redirectErrorStream(true)
