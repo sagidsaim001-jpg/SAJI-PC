@@ -6,6 +6,9 @@ on:
   pull_request:
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -44,3 +47,26 @@ jobs:
           name: SAJI-PC-ARM32-debug
           path: app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
+
+      - name: Prepare direct APK download and checksum
+        run: |
+          mkdir -p release-artifacts
+          cp app/build/outputs/apk/debug/app-debug.apk release-artifacts/SAJI-PC-ARM32-debug.apk
+          sha256sum release-artifacts/SAJI-PC-ARM32-debug.apk > release-artifacts/SAJI-PC-ARM32-debug.apk.sha256
+
+      - name: Publish direct ARM32 APK release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if gh release view apk-latest >/dev/null 2>&1; then
+            gh release upload apk-latest \
+              release-artifacts/SAJI-PC-ARM32-debug.apk \
+              release-artifacts/SAJI-PC-ARM32-debug.apk.sha256 --clobber
+          else
+            gh release create apk-latest \
+              release-artifacts/SAJI-PC-ARM32-debug.apk \
+              release-artifacts/SAJI-PC-ARM32-debug.apk.sha256 \
+              --title "SAJI PC ARM32 APK" \
+              --notes "SAJI PC ARM32 debug APK. Install on compatible armeabi-v7a Android devices." \
+              --prerelease --target "$GITHUB_SHA"
+          fi
