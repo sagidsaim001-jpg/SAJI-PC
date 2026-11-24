@@ -36,6 +36,9 @@ jobs:
         with:
           targets: arm-linux-androideabi
 
+      - name: Install target for pinned upstream nightly
+        run: rustup target add --toolchain nightly-2021-03-24 arm-linux-androideabi
+
       - name: Fetch pinned upstream PRoot-rs
         run: |
           git clone https://github.com/proot-me/proot-rs.git proot-rs-src
@@ -54,7 +57,7 @@ jobs:
         run: |
           # This upstream repo pins a 2021 nightly for unstable language features.
           # Build the cargo-make driver with stable, then let it invoke the pinned nightly.
-          RUSTUP_TOOLCHAIN=stable cargo install cargo-make --locked
+          env -u CARGO_BUILD_TARGET RUSTUP_TOOLCHAIN=stable cargo install cargo-make --locked
           cargo make build --profile=production
           mkdir -p ../runtime-artifact
           install -m 0755 target/arm-linux-androideabi/release/proot-rs ../runtime-artifact/libproot.so
