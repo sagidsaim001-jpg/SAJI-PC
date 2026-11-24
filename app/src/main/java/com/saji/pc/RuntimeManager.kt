@@ -47,7 +47,7 @@ class RuntimeManager(context: Context) {
     @Throws(Exception::class)
     fun install(progress: (String) -> Unit) {
         runtimeDir.mkdirs()
-        progress("Checking latest verified ARMHF runtime build...")
+        progress("Checking latest ARMHF runtime build...")
         val artifact = findLatestRuntimeArtifact()
         val artifactSize = artifact.getLong("size_in_bytes")
         val artifactDigest = artifact.optString("digest").removePrefix("sha256:")
@@ -75,8 +75,45 @@ class RuntimeManager(context: Context) {
             "ARMHF + Wine32 bundle",
             progress
         )
-        verifySha256(artifactZip, artifactDigest)
+        installFromArtifactZip(artifactZip, artifact, progress)
+    }
 
+    @Throws(Exception::class)
+    fun installFromStream(input: InputStream, progress: (String) -> Unit) {
+        runtimeDir.mkdirs()
+        val artifactZip = File(runtimeDir, "SAJI-PC-runtime-artifact.zip")
+        progress("Copying downloaded runtime ZIP...")
+        artifactZip.delete()
+        input.use { source ->
+            BufferedOutputStream(FileOutputStream(artifactZip)).use { output ->
+                val buffer = ByteArray(64 * 1024)
+                var copied = 0L
+                while (true) {
+                    val count = source.read(buffer)
+                    if (count < 0) break
+                    output.write(buffer, 0, count)
+                    copied += count
+                    if (copied % (32L * 1024L * 1024L) < buffer.size) {
+                        progress("Runtime ZIP copied: " + formatBytes(copied))
+                    }
+                }
+                output.flush()
+            }
+        }
+        require(artifactZip.isFile && artifactZip.length() > 1024L) {
+            "Selected runtime ZIP empty ya invalid hai."
+        }
+        installFromArtifactZip(artifactZip, null, progress)
+    }
+
+    private fun installFromArtifactZip(
+        artifactZip: File,
+        artifact: JSONObject?,
+        progress: (String) -> Unit
+    ) {
+        if (artifact != null) {
+            verifySha256(artifactZip, artifact.optString("digest").removePrefix("sha256:"))
+        }
         progress("Checking runtime bundle contents...")
         extractArtifactZip(artifactZip, bundleDir)
         val manifestFile = File(bundleDir, "runtime-manifest.json")
@@ -191,7 +228,7 @@ class RuntimeManager(context: Context) {
             .put("architecture", manifest.getString("architecture"))
             .put("windows_architecture", manifest.getString("windows_architecture"))
             .put("version", manifest.optString("version", "unknown"))
-            .put("artifact_created_at", artifact.optString("created_at"))
+            .put("artifact_created_at", artifact?.optString("created_at") ?: "manual-import")
             .put("installed_at", System.currentTimeMillis())
         readyMarker.writeText(marker.toString())
         rootArchive.delete()
@@ -272,6 +309,7 @@ class RuntimeManager(context: Context) {
             found.contains("SHA256SUMS")) {
             "Runtime artifact incomplete hai."
         }
+
     }
 
     private fun readUrlText(url: String): String {
