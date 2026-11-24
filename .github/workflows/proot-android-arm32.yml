@@ -1,0 +1,74 @@
+name: SAJI PC PRoot Android ARM32 runtime build
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/proot-android-arm32.yml"
+      - "runtime/**"
+
+permissions:
+  contents: read
+
+jobs:
+  build-proot-android-arm32:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - name: Checkout SAJI PC
+        uses: actions/checkout@v4
+
+      - name: Set up JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Install Android NDK
+        run: |
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses || true
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "ndk;27.2.12479018"
+          echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/27.2.12479018" >> "$GITHUB_ENV"
+
+      - name: Set up Rust with Android ARM32 target
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: arm-linux-androideabi
+
+      - name: Fetch pinned upstream PRoot-rs
+        run: |
+          git clone https://github.com/proot-me/proot-rs.git proot-rs-src
+          git -C proot-rs-src checkout cd918286fa600f395c30c2d8a5c12274912c35c6
+          mkdir -p proot-rs-src/.cargo
+          cat > proot-rs-src/.cargo/config.toml <<EOF
+          [target.arm-linux-androideabi]
+          linker = "$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/armv7a-linux-androideabi26-clang"
+          EOF
+          cat proot-rs-src/.cargo/config.toml
+
+      - name: Build PRoot-rs and loader shim
+        working-directory: proot-rs-src
+        env:
+          CARGO_BUILD_TARGET: arm-linux-androideabi
+        run: |
+          cargo install cargo-make --locked
+          cargo make build --profile=production
+          mkdir -p ../runtime-artifact
+          install -m 0755 target/arm-linux-androideabi/release/proot-rs ../runtime-artifact/libproot.so
+          install -m 0755 target/arm-linux-androideabi/release/loader-shim ../runtime-artifact/libproot-loader.so
+
+      - name: Verify Android ARM32 PRoot artifacts
+        run: |
+          file runtime-artifact/libproot.so runtime-artifact/libproot-loader.so
+          readelf -h runtime-artifact/libproot.so | grep -E 'Class:|Machine:'
+          readelf -h runtime-artifact/libproot-loader.so | grep -E 'Class:|Machine:'
+          sha256sum runtime-artifact/* > runtime-artifact/SHA256SUMS
+
+      - name: Upload Android ARM32 PRoot runtime
+        uses: actions/upload-artifact@v4
+        with:
+          name: SAJI-PC-PRoot-Android-ARM32
+          path: runtime-artifact/*
+          if-no-files-found: error
+          retention-days: 30
