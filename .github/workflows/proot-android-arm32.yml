@@ -9,7 +9,7 @@ on:
       - "runtime/**"
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   build-proot-android-arm32:
@@ -73,6 +73,10 @@ jobs:
           readelf -h runtime-artifact/libproot.so | grep -E 'Class:|Machine:'
           readelf -h runtime-artifact/libproot-loader.so | grep -E 'Class:|Machine:'
           sha256sum runtime-artifact/* > runtime-artifact/SHA256SUMS
+          tar -czf runtime-artifact/SAJI-PC-PRoot-Android-ARM32.tar.gz \
+            -C runtime-artifact libproot.so libproot-loader.so
+          sha256sum runtime-artifact/SAJI-PC-PRoot-Android-ARM32.tar.gz \
+            > runtime-artifact/PRoot-SHA256SUMS
 
       - name: Upload Android ARM32 PRoot runtime
         uses: actions/upload-artifact@v4
@@ -81,3 +85,20 @@ jobs:
           path: runtime-artifact/*
           if-no-files-found: error
           retention-days: 30
+
+      - name: Publish Android ARM32 PRoot release asset
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if gh release view proot-latest >/dev/null 2>&1; then
+            gh release upload proot-latest \
+              runtime-artifact/SAJI-PC-PRoot-Android-ARM32.tar.gz \
+              runtime-artifact/PRoot-SHA256SUMS --clobber
+          else
+            gh release create proot-latest \
+              runtime-artifact/SAJI-PC-PRoot-Android-ARM32.tar.gz \
+              runtime-artifact/PRoot-SHA256SUMS \
+              --title "SAJI PC Android ARM32 PRoot" \
+              --notes "Android ARM32 PRoot-rs executable and loader shim." \
+              --prerelease --target "$GITHUB_SHA"
+          fi
