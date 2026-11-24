@@ -343,6 +343,9 @@ class MainActivity : Activity() {
                     "--version"
                 )
                 val builder = ProcessBuilder(command).redirectErrorStream(true)
+                builder.environment()["PROOT_LOADER"] =
+                    File(runtimeManager.runtimeBinDir, "libproot-loader.so").absolutePath
+                builder.environment()["PROOT_TMP_DIR"] = cacheDir.absolutePath
                 builder.environment()["HOME"] = "/home/saji"
                 builder.environment()["WINEPREFIX"] = "/home/saji/.wine"
                 builder.environment()["WINEARCH"] = "win32"
@@ -581,6 +584,9 @@ class MainActivity : Activity() {
             )
             processLog.setLength(0)
             val builder = ProcessBuilder(command).redirectErrorStream(true)
+            builder.environment()["PROOT_LOADER"] =
+                File(runtimeManager.runtimeBinDir, "libproot-loader.so").absolutePath
+            builder.environment()["PROOT_TMP_DIR"] = cacheDir.absolutePath
             builder.environment()["HOME"] = filesDir.absolutePath
             builder.environment()["TMPDIR"] = cacheDir.absolutePath
             builder.environment()["RUST_LOG"] = "info"
