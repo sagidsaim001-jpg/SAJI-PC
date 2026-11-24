@@ -47,6 +47,7 @@ class MainActivity : Activity() {
     private var selectedExeFile: File? = null
     private var selectedExeMachine: Int? = null
     private var runtimeTestPassed = false
+    private var runtimeTestMessage = "Device test abhi run nahi hua."
     private var runtimeProcess: Process? = null
     private val worker: ExecutorService = Executors.newSingleThreadExecutor()
     private val processLog = StringBuilder()
@@ -195,7 +196,7 @@ class MainActivity : Activity() {
     private fun refreshRuntimeState() {
         val ready = runtimeManager.isReady()
         runtimeStatus.text = if (ready) {
-            nativeEngineStatus() + "\nWine32 + Box86 + ARMHF runtime installed"
+            nativeEngineStatus() + "\nWine32 + Box86 + ARMHF runtime installed\n" + runtimeTestMessage
         } else {
             nativeEngineStatus() + "\nWindows runtime not installed"
         }
@@ -217,6 +218,7 @@ class MainActivity : Activity() {
         installButton.isEnabled = false
         launchButton.isEnabled = false
         runtimeTestPassed = false
+        runtimeTestMessage = "Runtime install complete hone ke baad device test required hai."
         runtimeStatus.text = "Runtime manifest check ho raha hai…"
         worker.execute {
             try {
@@ -241,6 +243,7 @@ class MainActivity : Activity() {
     private fun verifyRuntime() {
         if (!runtimeManager.isReady()) {
             runtimeTestPassed = false
+            runtimeTestMessage = "Runtime files missing."
             refreshRuntimeState()
             Toast.makeText(this, "Pehle runtime install karein.", Toast.LENGTH_LONG).show()
             return
@@ -248,7 +251,8 @@ class MainActivity : Activity() {
         testRuntimeButton.isEnabled = false
         launchButton.isEnabled = false
         runtimeTestPassed = false
-        runtimeStatus.text = "Phone par PRoot + ARMHF + Box86 + Wine32 test ho raha hai…"
+        runtimeTestMessage = "Phone par PRoot + ARMHF + Box86 + Wine32 test ho raha hai..."
+        runtimeStatus.text = runtimeTestMessage
 
         worker.execute {
             var process: Process? = null
@@ -259,7 +263,7 @@ class MainActivity : Activity() {
                 val command = arrayListOf(
                     proot.absolutePath,
                     "--kill-on-exit",
-                    "--rootfs=${rootfs.absolutePath}",
+                    "--rootfs=" + rootfs.absolutePath,
                     "--bind=/dev:/dev",
                     "--bind=/proc:/proc",
                     "--cwd=/",
@@ -284,7 +288,7 @@ class MainActivity : Activity() {
                                 val line = stream.readLine() ?: break
                                 synchronized(output) {
                                     if (output.length > 5000) output.delete(0, 1500)
-                                    output.append(line).append('\\n')
+                                    output.append(line).append(10.toChar())
                                 }
                             }
                         }
@@ -301,13 +305,13 @@ class MainActivity : Activity() {
                 val resultText = synchronized(output) { output.toString() }.trim()
                 if (activeProcess.exitValue() != 0 || !resultText.contains("wine-", ignoreCase = true)) {
                     throw IllegalStateException(
-                        "Wine32 test fail hua (exit ${activeProcess.exitValue()}): " +
+                        "Wine32 test fail hua (exit " + activeProcess.exitValue() + "): " +
                             resultText.takeLast(1000)
                     )
                 }
                 runOnUiThread {
                     runtimeTestPassed = true
-                    runtimeStatus.text = "Device runtime test PASS\\n$resultText\\nAb 32-bit Windows EXE launch kar sakte hain."
+                    runtimeTestMessage = "Device runtime test PASS: " + resultText
                     refreshRuntimeState()
                     Toast.makeText(this, "PRoot + Box86 + Wine32 test PASS.", Toast.LENGTH_LONG).show()
                 }
@@ -316,7 +320,8 @@ class MainActivity : Activity() {
                 val detail = synchronized(output) { output.toString() }.takeLast(1000)
                 runOnUiThread {
                     runtimeTestPassed = false
-                    runtimeStatus.text = "Device runtime test FAIL\\n${error.message ?: "unknown error"}\\n$detail"
+                    runtimeTestMessage = "Device runtime test FAIL: " +
+                        (error.message ?: "unknown error") + " " + detail
                     refreshRuntimeState()
                     Toast.makeText(this, "Is phone par runtime verification fail hui. Details status mein hain.", Toast.LENGTH_LONG).show()
                 }
