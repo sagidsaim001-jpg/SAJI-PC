@@ -52,7 +52,9 @@ jobs:
         env:
           CARGO_BUILD_TARGET: arm-linux-androideabi
         run: |
-          cargo install cargo-make --locked
+          # This upstream repo pins a 2021 nightly for unstable language features.
+          # Build the cargo-make driver with stable, then let it invoke the pinned nightly.
+          RUSTUP_TOOLCHAIN=stable cargo install cargo-make --locked
           cargo make build --profile=production
           mkdir -p ../runtime-artifact
           install -m 0755 target/arm-linux-androideabi/release/proot-rs ../runtime-artifact/libproot.so
