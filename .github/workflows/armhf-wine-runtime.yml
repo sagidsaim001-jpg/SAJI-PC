@@ -2,13 +2,11 @@ name: SAJI PC ARMHF Linux + x86 Wine runtime bundle
 
 on:
   workflow_dispatch:
-  push:
-    branches: [main]
-    paths:
-      - ".github/workflows/armhf-wine-runtime.yml"
+  schedule:
+    - cron: "0 5 * * 1"
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   build-armhf-wine-rootfs:
@@ -173,23 +171,4 @@ jobs:
           name: SAJI-PC-ARMHF-Wine32-RootFS
           path: runtime-bundle/*
           if-no-files-found: error
-          retention-days: 30
-
-      - name: Publish stable runtime download release
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          if gh release view runtime-latest >/dev/null 2>&1; then
-            gh release upload runtime-latest \
-              runtime-bundle/SAJI-PC-ARMHF-Wine32-RootFS.tar.gz \
-              runtime-bundle/runtime-manifest.json \
-              runtime-bundle/SHA256SUMS --clobber
-          else
-            gh release create runtime-latest \
-              runtime-bundle/SAJI-PC-ARMHF-Wine32-RootFS.tar.gz \
-              runtime-bundle/runtime-manifest.json \
-              runtime-bundle/SHA256SUMS \
-              --title "SAJI PC ARMHF Wine32 Runtime" \
-              --notes "Debian ARMHF + Box86 + i386 Wine32 + noVNC runtime bundle." \
-              --prerelease --target "$GITHUB_SHA"
-          fi
+          retention-days: 90
