@@ -1,61 +1,77 @@
 # SAJI PC Runtime Integration Plan
 
-## Current verified scope
+## Product target
 
-The Android application is an ARM32-only shell. It can select a document through Android's Storage Access Framework and inspect the first two bytes for the Windows MZ signature. It does not execute Windows binaries.
+Build an Android armeabi-v7a application that can run compatible 32-bit x86 Windows PE programs on an ARM32 Android device. This does not imply support for every Windows program: Wine compatibility, x86 instruction coverage, available memory, graphics APIs and device drivers all constrain which programs will work. x64 Windows PE is out of scope for this ARM32 build.
 
 ## Required execution chain
 
-A practical 32-bit x86 Windows compatibility stack on 32-bit ARM Android needs all of these layers:
+1. Android SAF imports an EXE into private app storage.
+2. An Android ARM32 PRoot process starts a Debian ARMHF/glibc root filesystem without root access.
+3. ARMHF Box86 runs inside that root filesystem and translates x86 Linux processes.
+4. i386 Wine32 and its i386 libraries load the 32-bit Windows PE executable.
+5. Xvfb provides an X11 display; x11vnc exposes that display to the Android app's desktop viewer.
+6. The Android app manages runtime installation, process lifecycle, EXE arguments, logs, keyboard/mouse/touch input and eventual audio routing.
+7. Launch is enabled only after architecture checks and a target-device smoke test pass.
 
-1. Android document access and private app storage.
-2. A Linux userspace compatible with the Android host. A Debian armhf root filesystem is a candidate, but must be tested on the target Android 13 device.
-3. A process/container boundary such as a carefully configured proot-style environment, or an Android-native port. Android's Bionic libc is not interchangeable with a glibc-based ARMHF root filesystem.
-4. Box86 built for the ARM32 host environment. Box86 translates x86 Linux userspace programs to ARM; it is not itself a Windows PE loader.
-5. A matching 32-bit x86 Wine userspace, including its required libraries and registry/prefix setup.
-6. Display, audio, input, filesystem and process lifecycle bridges between Wine/Linux and Android.
-7. EXE launch orchestration with architecture checks, exit-code reporting and logs.
+Android Bionic and Debian ARMHF/glibc are different userspaces. The native Android PRoot binary and the ARMHF guest binaries must stay separate.
+
+## Current verified scope
+
+- Android shell can import a file using the Storage Access Framework.
+- Imported files are copied into private app storage.
+- The PE parser checks MZ/PE headers and reports the machine type.
+- ARM32 Android APK CI build has passed.
+- No Windows program has yet been executed on the target phone.
+
+## Build pipelines now in the repository
+
+- .github/workflows/android-arm32.yml: produces the ARM32 debug APK.
+- .github/workflows/box86-android-arm32.yml: an Android/Bionic Box86 compile probe. This is not the final guest Box86 build; the latest source compatibility fix is still awaiting CI confirmation.
+- .github/workflows/armhf-wine-runtime.yml: cross-compiles Box86 for ARMHF Linux, bootstraps Debian Trixie armhf, adds i386 multiarch, installs Wine32:i386, Xvfb and x11vnc, and packages a rootfs artifact. This workflow is not yet verified.
+- .github/workflows/proot-android-arm32.yml: attempts to cross-compile upstream PRoot-rs and its loader shim for Android ARM32. This workflow is not yet verified.
 
 ## Integration gates
 
-### Gate A: Android shell
-- Build armeabi-v7a debug APK.
-- Verify package ABI and install on a real 32-bit Android 13 device.
-- Test document selection and persistent URI permission.
+### Gate A: ARMHF Box86 and rootfs
+- Build Box86 with an ARMv7 hard-float toolchain.
+- Build a Debian ARMHF rootfs with i386 Wine32 and desktop-server packages.
+- Verify ELF machine types and dependency availability.
+- Smoke-test Box86 and Wine in an ARM execution environment; QEMU CI checks are not a substitute for device execution.
 
-### Gate B: ARMHF userspace
-- Produce or obtain a reproducible armhf rootfs with package/license manifests.
-- Verify that an ARMHF executable runs in the selected Android isolation strategy.
-- Do not ship a rootfs until its redistribution terms and size are reviewed.
+### Gate B: Android PRoot
+- Build the Android ARM32 PRoot executable and loader shim.
+- Validate PRoot on the actual Android 13 device against the Debian ARMHF rootfs.
+- Confirm ptrace/seccomp restrictions and ELF execution behavior.
 
-### Gate C: Box86
-- Pin an upstream Box86 commit.
-- Cross-build for the selected ARM32 Linux userspace.
-- Verify box86 --version and a small x86 Linux ELF test program inside the rootfs.
-- Upstream project: https://github.com/ptitSeb/box86 (MIT).
+### Gate C: APK integration
+- Package the PRoot executable and loader shim into the APK's native library directory.
+- Add a secure first-run runtime bundle download and extraction flow with free-space checks, progress, integrity verification and retry support.
+- Bind Android EXE imports into the guest filesystem.
+- Start PRoot, Xvfb, x11vnc, Box86 and Wine in a controlled process group.
 
-### Gate D: Wine
-- Build or package 32-bit x86 Wine for the exact Box86/rootfs combination.
-- Verify wine --version, prefix creation and a minimal Windows PE test.
-- Wine is LGPL-licensed; preserve notices and source-offer/source distribution obligations for any distributed binaries.
+### Gate D: Desktop interaction
+- Implement an Android VNC viewer for the Xvfb display.
+- Add keyboard, mouse and touch-to-pointer forwarding.
+- Add audio routing only after a working, low-latency bridge is selected.
+- Add suspend/resume, process cleanup, logs and crash reporting.
 
-### Gate E: Android integration
-- Bridge Android document URIs into controlled runtime storage.
-- Implement display/audio/input, suspend/resume and process cleanup.
-- Enable the Launch button only after all runtime checks pass.
+### Gate E: Target device verification
+- Install on a real ARM32 Android 13 phone.
+- Verify PRoot can execute ARMHF /bin/sh.
+- Verify Box86 can launch an x86 Linux test binary.
+- Verify Wine32 can create a prefix and open a small Windows PE test.
+- Only then enable the normal EXE Launch control.
 
-## Current status
+## Compatibility and safety notes
 
-A dedicated GitHub Actions workflow now builds a pinned upstream Box86 revision for Android `armeabi-v7a` using the Android NDK. This is a compile probe only: a successful binary build does not yet provide the Linux root filesystem, Wine, or EXE execution.
+- Box86 translates x86 Linux userspace. It does not load Windows PE by itself; Wine is required.
+- Only 32-bit x86 Windows executables are targeted in this project scope.
+- Wine compatibility is per-application. No emulator can promise that every Windows application will run.
+- The phone's CPU must support the ARMv7/NEON features used by the selected Box86 dynarec build; this must be probed on-device.
+- Runtime packages require license notices and reproducible source references. Box86 is MIT; Wine is LGPL; PRoot-rs and PRoot are GPL-family components. Keep their notices and corresponding source obligations with distributed builds.
+- CI can compile and package binaries, but it cannot prove that the user's phone permits the required PRoot ptrace behavior or that the runtime renders correctly on that device.
 
-- Android shell: implemented; CI build still being validated.
-- EXE selection and MZ signature check: implemented, not device-tested yet.
-- ARMHF rootfs: not integrated; Android Bionic and Debian armhf/glibc require a deliberate compatibility boundary.
-- Box86: dedicated Android ARM32 NDK cross-build workflow added; native binary build is pending CI verification and is not yet integrated into the APK.
-- 32-bit Wine: not integrated.
-- Windows EXE execution: not available.
-- Device installation test: not performed by CI; requires the APK to be installed and exercised on the user's Infinix device.
+## Present status
 
-## Why the layers cannot be skipped
-
-Box86 targets x86 Linux user-space applications on ARM Linux. A Windows PE executable needs Wine, and Wine itself depends on a compatible Linux userspace and libraries. A successful Android APK build only verifies the launcher shell and native JNI library, not this execution chain.
+The project is in active runtime construction. The latest APK build is a launcher/import shell, not yet a Windows emulator. ARMHF Box86 + Wine32 rootfs and Android ARM32 PRoot now have dedicated workflows; their CI results and the actual APK integration remain outstanding.
