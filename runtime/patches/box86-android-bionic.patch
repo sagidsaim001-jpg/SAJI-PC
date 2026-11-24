@@ -1,0 +1,5 @@
+--- a/src/emu/x86run0f.c
++++ b/src/emu/x86run0f.c
+@@ -266,7 +266,7 @@
+-            if(isnanf(EX->f[1]) || isinff(EX->f[1]) || EX->f[1]>=(float)0x80000000U || EX->f[1]<-(float)0x80000000U)
++            if(isnanf(EX->f[1]) || isinf(EX->f[1]) || EX->f[1]>=(float)0x80000000U || EX->f[1]<-(float)0x80000000U)
