@@ -24,7 +24,8 @@ class RuntimeManager(context: Context) {
     private val appContext = context.applicationContext
     private val runtimeDir = File(appContext.filesDir, "saji-runtime")
     val rootfsDir = File(runtimeDir, "rootfs")
-    val prootBinary = File(runtimeDir, "bin/libproot.so")
+    val runtimeBinDir = File(runtimeDir, "bin")
+    val prootBinary = File(runtimeBinDir, "libproot.so")
     private val readyMarker = File(runtimeDir, "runtime-ready.json")
 
     private val artifactsUrl =
