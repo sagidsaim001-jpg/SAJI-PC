@@ -392,11 +392,12 @@ class MainActivity : Activity() {
             }
             val command = arrayListOf(
                 proot.absolutePath,
-                "--rootfs", rootfs.absolutePath,
-                "--bind", "/dev:/dev",
-                "--bind", "/proc:/proc",
-                "--bind", windowsDir.absolutePath + ":/mnt/saji",
-                "--cwd", "/",
+                "--kill-on-exit",
+                "--rootfs=${rootfs.absolutePath}",
+                "--bind=/dev:/dev",
+                "--bind=/proc:/proc",
+                "--bind=${windowsDir.absolutePath}:/mnt/saji",
+                "--cwd=/",
                 "/usr/local/bin/saji-desktop",
                 guestExePath
             )
