@@ -58,6 +58,10 @@ jobs:
           # This upstream repo pins a 2021 nightly for unstable language features.
           # Build the cargo-make driver with stable, then let it invoke the pinned nightly.
           env -u CARGO_BUILD_TARGET RUSTUP_TOOLCHAIN=stable cargo install cargo-make --locked
+          NDK_BIN="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin"
+          export CC_arm_linux_androideabi="$NDK_BIN/armv7a-linux-androideabi26-clang"
+          export AR_arm_linux_androideabi="$NDK_BIN/llvm-ar"
+          export CFLAGS_arm_linux_androideabi="--target=armv7a-linux-androideabi26"
           cargo make build --profile=production
           mkdir -p ../runtime-artifact
           install -m 0755 target/arm-linux-androideabi/release/proot-rs ../runtime-artifact/libproot.so
