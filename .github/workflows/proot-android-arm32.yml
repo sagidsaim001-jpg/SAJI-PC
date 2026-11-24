@@ -1,4 +1,4 @@
-name: SAJI PC PRoot Android ARM32 runtime build
+name: SAJI PC PRoot Android ARM32 native build
 
 on:
   workflow_dispatch:
@@ -11,89 +11,129 @@ on:
 permissions:
   contents: write
 
+env:
+  NDK_VERSION: r29
+  ANDROID_API: "24"
+  TALLOC_VERSION: "2.5.0"
+  PROOT_VERSION: "5.1.107.102"
+
 jobs:
   build-proot-android-arm32:
     runs-on: ubuntu-24.04
-    timeout-minutes: 60
+    timeout-minutes: 90
     steps:
       - name: Checkout SAJI PC
         uses: actions/checkout@v4
 
-      - name: Set up JDK
-        uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: "17"
-
-      - name: Install Android NDK
+      - name: Install native build dependencies
         run: |
-          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses || true
-          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "ndk;27.2.12479018"
-          echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/27.2.12479018" >> "$GITHUB_ENV"
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential make git wget unzip zip file binutils python3
 
-      - name: Set up Rust with Android ARM32 target
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: arm-linux-androideabi
-
-      - name: Install target for pinned upstream nightly
-        run: rustup target add --toolchain nightly-2021-03-24 arm-linux-androideabi
-
-      - name: Fetch pinned upstream PRoot-rs
+      - name: Download Android NDK r29
         run: |
-          git clone https://github.com/proot-me/proot-rs.git proot-rs-src
-          git -C proot-rs-src checkout cd918286fa600f395c30c2d8a5c12274912c35c6
-          mkdir -p proot-rs-src/.cargo
-          cat > proot-rs-src/.cargo/config.toml <<EOF
-          [target.arm-linux-androideabi]
-          linker = "$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/armv7a-linux-androideabi26-clang"
+          mkdir -p "$RUNNER_TEMP/android-ndk"
+          cd "$RUNNER_TEMP/android-ndk"
+          wget -q https://dl.google.com/android/repository/android-ndk-${NDK_VERSION}-linux.zip
+          unzip -q android-ndk-${NDK_VERSION}-linux.zip
+          rm android-ndk-${NDK_VERSION}-linux.zip
+          echo "ANDROID_NDK=$RUNNER_TEMP/android-ndk/android-ndk-${NDK_VERSION}" >> "$GITHUB_ENV"
+
+      - name: Configure ARMv7 Android toolchain
+        run: |
+          TOOLCHAIN="$ANDROID_NDK/toolchains/llvm/prebuilt/linux-x86_64"
+          echo "TOOLCHAIN=$TOOLCHAIN" >> "$GITHUB_ENV"
+          echo "CC=$TOOLCHAIN/bin/armv7a-linux-androideabi${ANDROID_API}-clang" >> "$GITHUB_ENV"
+          echo "AR=$TOOLCHAIN/bin/llvm-ar" >> "$GITHUB_ENV"
+          echo "RANLIB=$TOOLCHAIN/bin/llvm-ranlib" >> "$GITHUB_ENV"
+          echo "STRIP=$TOOLCHAIN/bin/llvm-strip" >> "$GITHUB_ENV"
+          echo "OBJCOPY=$TOOLCHAIN/bin/llvm-objcopy" >> "$GITHUB_ENV"
+          echo "OBJDUMP=$TOOLCHAIN/bin/llvm-objdump" >> "$GITHUB_ENV"
+          echo "OPTFLAGS=-O3 -fdata-sections -ffunction-sections" >> "$GITHUB_ENV"
+          echo "OPTLDFLAGS=-Wl,--gc-sections -Wl,-s" >> "$GITHUB_ENV"
+          "$TOOLCHAIN/bin/armv7a-linux-androideabi${ANDROID_API}-clang" --version
+
+      - name: Build static ARM32 talloc dependency
+        run: |
+          wget -q https://www.samba.org/ftp/talloc/talloc-${TALLOC_VERSION}.tar.gz
+          tar xf talloc-${TALLOC_VERSION}.tar.gz
+          cd talloc-${TALLOC_VERSION}
+
+          cat > cross-answers.txt <<'EOF'
+          Checking uname sysname type: "Linux"
+          Checking uname machine type: "dontcare"
+          Checking uname release type: "dontcare"
+          Checking uname version type: "dontcare"
+          Checking simple C program: OK
+          building library support: OK
+          Checking for large file support: OK
+          Checking for -D_FILE_OFFSET_BITS=64: OK
+          Checking for WORDS_BIGENDIAN: OK
+          Checking for C99 vsnprintf: OK
+          Checking for HAVE_SECURE_MKSTEMP: OK
+          rpath library support: OK
+          -Wl,--version-script support: FAIL
+          Checking correct behavior of strtoll: OK
+          Checking correct behavior of strptime: OK
+          Checking for HAVE_IFACE_GETIFADDRS: OK
+          Checking for HAVE_IFACE_IFCONF: OK
+          Checking for HAVE_IFACE_IFREQ: OK
+          Checking getconf LFS_CFLAGS: OK
+          Checking for large file support without additional flags: OK
+          Checking for working strptime: OK
+          Checking for HAVE_SHARED_MMAP: OK
+          Checking for HAVE_MREMAP: OK
+          Checking for HAVE_INCOHERENT_MMAP: OK
+          Checking getconf large file support flags work: OK
           EOF
-          cat proot-rs-src/.cargo/config.toml
 
-      - name: Build PRoot-rs and loader shim
-        working-directory: proot-rs-src
-        env:
-          CARGO_BUILD_TARGET: arm-linux-androideabi
-        run: |
-          set -euxo pipefail
-          NDK_BIN="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin"
-          export CC_arm_linux_androideabi="$NDK_BIN/armv7a-linux-androideabi26-clang"
-          export AR_arm_linux_androideabi="$NDK_BIN/llvm-ar"
-          export CFLAGS_arm_linux_androideabi="--target=armv7a-linux-androideabi26"
-          # Rust's default unwind panic runtime pulls in ABI-specific unwinder
-          # symbols. This PRoot build uses abort-on-panic, so only ARM compiler
-          # builtins are required from the NDK.
-          NDK_ROOT="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64"
-          BUILTINS="$(find "$NDK_ROOT" -name 'libclang_rt.builtins-arm-android.a' -print -quit)"
-          test -n "$BUILTINS"
-          mkdir -p ndk-compat
-          ln -sf "$BUILTINS" ndk-compat/libgcc.a
-          export RUSTFLAGS="-C panic=abort -L native=$PWD/ndk-compat"
-          # Build the no_std loader using the upstream pinned nightly, embed it in PRoot,
-          # then build the actual Android ARM32 PRoot executable directly with Cargo.
-          RUSTFLAGS="-C panic=abort -C link-self-contained=no -L native=$PWD/ndk-compat" \
-            cargo +nightly-2021-03-24 build --locked --bin=loader-shim \
-            --features=build-binary --target=arm-linux-androideabi --release
-          install -m 0755 target/arm-linux-androideabi/release/loader-shim \
-            proot-rs/src/kernel/execve/loader-shim
-          cargo +nightly-2021-03-24 build --locked --bin=proot-rs \
-            --target=arm-linux-androideabi --release
-          mkdir -p ../runtime-artifact
-          install -m 0755 target/arm-linux-androideabi/release/proot-rs \
-            ../runtime-artifact/libproot.so
-          install -m 0755 target/arm-linux-androideabi/release/loader-shim \
-            ../runtime-artifact/libproot-loader.so
+          CC="$CC" CFLAGS="$OPTFLAGS" LDFLAGS="" ./configure \
+            --cross-compile --cross-answers=cross-answers.txt \
+            --disable-python --disable-rpath
+          make -j"$(nproc)"
+          cd bin/default
+          "$AR" rcs libtalloc.a talloc*.o
+          "$RANLIB" libtalloc.a
+          test -s libtalloc.a
 
-      - name: Verify Android ARM32 PRoot artifacts
+      - name: Fetch pinned Android-compatible PRoot source
         run: |
-          file runtime-artifact/libproot.so runtime-artifact/libproot-loader.so
-          readelf -h runtime-artifact/libproot.so | grep -E 'Class:|Machine:'
-          readelf -h runtime-artifact/libproot-loader.so | grep -E 'Class:|Machine:'
-          sha256sum runtime-artifact/* > runtime-artifact/SHA256SUMS
+          git clone --depth 1 --branch "v${PROOT_VERSION}" \
+            https://github.com/termux/proot.git proot-src
+          sed -i '1i#include <string.h>' \
+            proot-src/src/extension/ashmem_memfd/ashmem_memfd.c
+          grep -q 'PROOT_WITH_LIBANDROID_SHMEM' proot-src/src/GNUmakefile
+
+      - name: Build PRoot and ARM loader with Android NDK
+        run: |
+          cd proot-src
+          make -C src \
+            CC="$CC" AR="$AR" STRIP="$STRIP" \
+            OBJCOPY="$OBJCOPY" OBJDUMP="$OBJDUMP" \
+            CFLAGS="$OPTFLAGS -DARG_MAX=131072 -I../../talloc-${TALLOC_VERSION}" \
+            LDFLAGS="$OPTLDFLAGS ../../talloc-${TALLOC_VERSION}/bin/default/libtalloc.a -Wl,-z,noexecstack" \
+            V=1 loader proot
+
+          test -x src/proot
+          test -x src/loader/loader
+          file src/proot src/loader/loader
+          "$TOOLCHAIN/bin/llvm-readelf" -h src/proot | grep -E 'Class:|Machine:'
+          "$TOOLCHAIN/bin/llvm-readelf" -d src/proot > ../proot-dynamic.txt
+          cat ../proot-dynamic.txt
+
+      - name: Package PRoot Android ARM32 runtime
+        run: |
+          mkdir -p runtime-artifact
+          install -m 0755 proot-src/src/proot runtime-artifact/libproot.so
+          install -m 0755 proot-src/src/loader/loader runtime-artifact/libproot-loader.so
           tar -czf runtime-artifact/SAJI-PC-PRoot-Android-ARM32.tar.gz \
             -C runtime-artifact libproot.so libproot-loader.so
           sha256sum runtime-artifact/SAJI-PC-PRoot-Android-ARM32.tar.gz \
             > runtime-artifact/PRoot-SHA256SUMS
+          sha256sum runtime-artifact/libproot.so runtime-artifact/libproot-loader.so \
+            > runtime-artifact/BINARY-SHA256SUMS
+          ls -lh runtime-artifact/
 
       - name: Upload Android ARM32 PRoot runtime
         uses: actions/upload-artifact@v4
@@ -116,6 +156,6 @@ jobs:
               runtime-artifact/SAJI-PC-PRoot-Android-ARM32.tar.gz \
               runtime-artifact/PRoot-SHA256SUMS \
               --title "SAJI PC Android ARM32 PRoot" \
-              --notes "Android ARM32 PRoot-rs executable and loader shim." \
+              --notes "Android ARM32 PRoot built from Termux-compatible source with static talloc." \
               --prerelease --target "$GITHUB_SHA"
           fi
