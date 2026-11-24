@@ -37,9 +37,9 @@ jobs:
           git -C box86-src checkout bb716a2a6576cc06da811bf55e31e2f6f03b7596
           git -C box86-src rev-parse HEAD
           # Android's Bionic math headers expose isnan/isinf, not the glibc-only *f aliases.
-          grep -RIlE '\\b(isnanf|isinff)[[:space:]]*\\(' box86-src/src --include='*.c' \
-            | xargs -r sed -i -E 's/\\bisnanf[[:space:]]*\\(/isnan(/g; s/\\bisinff[[:space:]]*\\(/isinf(/g'
-          if grep -RInE '\\b(isnanf|isinff)[[:space:]]*\\(' box86-src/src --include='*.c'; then
+          grep -RIlE 'isnanf|isinff' box86-src/src --include='*.c' \
+            | xargs -r sed -i 's/isnanf/isnan/g; s/isinff/isinf/g'
+          if grep -RInE 'isnanf|isinff' box86-src/src --include='*.c'; then
             echo "Unpatched Android math aliases remain"
             exit 1
           fi
