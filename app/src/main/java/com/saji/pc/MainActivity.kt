@@ -2,111 +2,269 @@ package com.saji.pc
 
 import android.app.Activity
 import android.content.Intent
+import android.database.Cursor
+import android.graphics.Color
 import android.net.Uri
 import android.os.Bundle
-import android.graphics.Color
+import android.provider.OpenableColumns
 import android.view.Gravity
+import android.view.View
+import android.webkit.WebChromeClient
+import android.webkit.WebSettings
+import android.webkit.WebView
+import android.webkit.WebViewClient
 import android.widget.Button
 import android.widget.LinearLayout
+import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.Toast
-import android.database.Cursor
-import android.provider.OpenableColumns
+import java.io.BufferedReader
 import java.io.File
 import java.io.FileOutputStream
+import java.io.InputStreamReader
 import java.io.RandomAccessFile
+import java.net.InetSocketAddress
+import java.net.Socket
+import java.util.concurrent.ExecutorService
+import java.util.concurrent.Executors
 
 class MainActivity : Activity() {
     private external fun nativeEngineStatus(): String
-    private lateinit var selectedExeLabel: TextView
+
+    private lateinit var runtimeManager: RuntimeManager
     private lateinit var runtimeStatus: TextView
+    private lateinit var selectedExeLabel: TextView
+    private lateinit var desktopView: WebView
+    private lateinit var installButton: Button
+    private lateinit var launchButton: Button
+    private lateinit var stopButton: Button
+    private lateinit var hideDesktopButton: Button
+
     private var selectedExeFile: File? = null
+    private var selectedExeMachine: Int? = null
+    private var runtimeProcess: Process? = null
+    private val worker: ExecutorService = Executors.newSingleThreadExecutor()
+    private val processLog = StringBuilder()
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        runtimeManager = RuntimeManager(this)
+        buildInterface()
+        refreshRuntimeState()
+    }
+
+    private fun buildInterface() {
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            gravity = Gravity.CENTER
-            setPadding(28, 36, 28, 36)
-            setBackgroundColor(Color.rgb(15, 19, 29))
+            setBackgroundColor(Color.rgb(13, 17, 27))
+            setPadding(dp(14), dp(12), dp(14), dp(8))
         }
+
+        val scroll = ScrollView(this)
+        val panel = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER_HORIZONTAL
+        }
+
         val title = TextView(this).apply {
-            text = "SAJI PC"; textSize = 32f; setTextColor(Color.WHITE); gravity = Gravity.CENTER
+            text = "SAJI PC"
+            textSize = 29f
+            setTextColor(Color.WHITE)
+            gravity = Gravity.CENTER
+            setPadding(0, dp(6), 0, dp(2))
         }
         val subtitle = TextView(this).apply {
-            text = "ARM32 Windows compatibility environment"; textSize = 15f
-            setTextColor(Color.LTGRAY); gravity = Gravity.CENTER
+            text = "32-bit Windows desktop on ARM32 Android"
+            textSize = 13f
+            setTextColor(Color.LTGRAY)
+            gravity = Gravity.CENTER
         }
         runtimeStatus = TextView(this).apply {
-            text = nativeEngineStatus(); textSize = 14f
-            setTextColor(Color.rgb(130, 210, 170)); gravity = Gravity.CENTER
-            setPadding(0, 24, 0, 16)
+            text = nativeEngineStatus()
+            textSize = 13f
+            setTextColor(Color.rgb(130, 210, 170))
+            gravity = Gravity.CENTER
+            setPadding(dp(8), dp(14), dp(8), dp(12))
+        }
+        installButton = makeButton("Install / Update Windows Runtime") {
+            installRuntime()
+        }
+        val selectButton = makeButton("Select Windows EXE") {
+            openExePicker()
         }
         selectedExeLabel = TextView(this).apply {
-            text = "No Windows EXE selected"; textSize = 13f
-            setTextColor(Color.LTGRAY); gravity = Gravity.CENTER
-            setPadding(0, 8, 0, 16)
+            text = "No Windows EXE selected"
+            textSize = 13f
+            setTextColor(Color.LTGRAY)
+            gravity = Gravity.CENTER
+            setPadding(dp(8), dp(8), dp(8), dp(10))
         }
-        val selectExe = Button(this).apply {
-            text = "Select Windows EXE"; setOnClickListener { openExePicker() }
+        launchButton = makeButton("Launch in Desktop") {
+            launchWindowsExe()
         }
-        val launchExe = Button(this).apply {
-            text = "Launch EXE"; isEnabled = false
-            setOnClickListener {
-                Toast.makeText(this@MainActivity, "Windows runtime is not ready. EXE is safely stored in app storage.", Toast.LENGTH_LONG).show()
+        launchButton.isEnabled = false
+        stopButton = makeButton("Stop Desktop Session") {
+            stopDesktopSession()
+        }
+        stopButton.isEnabled = false
+        hideDesktopButton = makeButton("Hide Desktop View") {
+            desktopView.visibility = View.GONE
+        }
+
+        val note = TextView(this).apply {
+            text = "Target: Windows x86 (32-bit) EXE. x64 applications are not supported by this ARM32 build. App compatibility depends on Wine."
+            textSize = 11f
+            setTextColor(Color.rgb(172, 180, 196))
+            gravity = Gravity.CENTER
+            setPadding(dp(8), dp(12), dp(8), dp(10))
+        }
+
+        panel.addView(title)
+        panel.addView(subtitle)
+        panel.addView(runtimeStatus)
+        panel.addView(installButton, fullWidthParams())
+        panel.addView(selectButton, fullWidthParams())
+        panel.addView(selectedExeLabel)
+        panel.addView(launchButton, fullWidthParams())
+        panel.addView(stopButton, fullWidthParams())
+        panel.addView(hideDesktopButton, fullWidthParams())
+        panel.addView(note)
+        scroll.addView(panel)
+        root.addView(scroll, LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT,
+            LinearLayout.LayoutParams.WRAP_CONTENT
+        ))
+
+        desktopView = WebView(this).apply {
+            visibility = View.GONE
+            setBackgroundColor(Color.BLACK)
+            settings.javaScriptEnabled = true
+            settings.domStorageEnabled = true
+            settings.javaScriptCanOpenWindowsAutomatically = false
+            settings.allowFileAccess = false
+            settings.allowContentAccess = false
+            settings.mixedContentMode = WebSettings.MIXED_CONTENT_NEVER_ALLOW
+            webViewClient = WebViewClient()
+            webChromeClient = WebChromeClient()
+        }
+        root.addView(desktopView, LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT,
+            0,
+            1f
+        ))
+        setContentView(root)
+    }
+
+    private fun makeButton(label: String, action: () -> Unit): Button {
+        return Button(this).apply {
+            text = label
+            isAllCaps = false
+            textSize = 14f
+            setOnClickListener { action() }
+        }
+    }
+
+    private fun fullWidthParams() = LinearLayout.LayoutParams(
+        LinearLayout.LayoutParams.MATCH_PARENT,
+        dp(48)
+    ).apply {
+        bottomMargin = dp(5)
+    }
+
+    private fun dp(value: Int): Int = (value * resources.displayMetrics.density).toInt()
+
+    private fun refreshRuntimeState() {
+        val ready = runtimeManager.isReady()
+        runtimeStatus.text = if (ready) {
+            nativeEngineStatus() + "\nWine32 + Box86 + ARMHF runtime installed"
+        } else {
+            nativeEngineStatus() + "\nWindows runtime not installed"
+        }
+        installButton.isEnabled = runtimeProcess?.isAlive != true
+        launchButton.isEnabled = ready &&
+            selectedExeFile?.isFile == true &&
+            selectedExeMachine == 0x014c &&
+            runtimeProcess?.isAlive != true
+        stopButton.isEnabled = runtimeProcess?.isAlive == true
+    }
+
+    private fun installRuntime() {
+        if (runtimeProcess?.isAlive == true) {
+            Toast.makeText(this, "Pehle desktop session stop karein.", Toast.LENGTH_LONG).show()
+            return
+        }
+        installButton.isEnabled = false
+        launchButton.isEnabled = false
+        runtimeStatus.text = "Runtime manifest check ho raha hai…"
+        worker.execute {
+            try {
+                runtimeManager.install { message ->
+                    runOnUiThread { runtimeStatus.text = message }
+                }
+                runOnUiThread {
+                    runtimeStatus.text = "Windows runtime installed. 32-bit EXE select karke launch karein."
+                    refreshRuntimeState()
+                    Toast.makeText(this, "Runtime installation complete.", Toast.LENGTH_LONG).show()
+                }
+            } catch (error: Exception) {
+                runOnUiThread {
+                    runtimeStatus.text = "Runtime install failed: ${error.message ?: "unknown error"}"
+                    refreshRuntimeState()
+                    Toast.makeText(this, "Runtime install failed. Details status mein hain.", Toast.LENGTH_LONG).show()
+                }
             }
         }
-        val runtime = Button(this).apply {
-            text = "Runtime Manager"; setOnClickListener { showRuntimeStatus() }
-        }
-        val note = TextView(this).apply {
-            text = "Selected files are copied to private app storage and checked for Windows PE architecture. Execution stays disabled until the runtime is verified."
-            textSize = 12f; setTextColor(Color.rgb(180, 185, 198))
-            gravity = Gravity.CENTER; setPadding(0, 20, 0, 0)
-        }
-        root.addView(title); root.addView(subtitle); root.addView(runtimeStatus)
-        root.addView(selectExe); root.addView(selectedExeLabel); root.addView(launchExe)
-        root.addView(runtime); root.addView(note)
-        setContentView(root)
     }
 
     private fun openExePicker() {
         val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
-            addCategory(Intent.CATEGORY_OPENABLE); type = "*/*"
+            addCategory(Intent.CATEGORY_OPENABLE)
+            type = "*/*"
             addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION)
         }
         startActivityForResult(intent, REQUEST_EXE)
     }
 
-    @Deprecated("Deprecated in Android API, retained for broad platform compatibility")
+    @Deprecated("Deprecated API retained for platform compatibility")
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
         if (requestCode != REQUEST_EXE || resultCode != RESULT_OK) return
         val uri = data?.data ?: return
         try {
             contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
-        } catch (_: SecurityException) { }
+        } catch (_: SecurityException) {
+        }
+
         try {
             val name = safeFileName(queryDisplayName(uri) ?: "selected.exe")
             val target = File(File(filesDir, "windows"), name)
             target.parentFile?.mkdirs()
             contentResolver.openInputStream(uri).use { input ->
-                requireNotNull(input) { "Cannot open selected file" }
+                requireNotNull(input) { "Selected file open nahi ho saki." }
                 FileOutputStream(target).use { output -> input.copyTo(output) }
             }
+
             val pe = inspectPe(target)
-            selectedExeFile = if (pe.isWindowsPe) target else null
+            selectedExeFile = if (pe.isWindowsPe && pe.machine == 0x014c) target else null
+            selectedExeMachine = if (pe.isWindowsPe) pe.machine else null
             selectedExeLabel.text = when {
-                !pe.isWindowsPe -> "$name\nNot a valid Windows PE executable"
-                pe.machine == 0x014c -> "$name\nWindows PE detected: x86 (32-bit)\nSaved in app storage"
-                pe.machine == 0x8664 -> "$name\nWindows PE detected: x64 (not supported by ARM32 target)\nSaved in app storage"
-                else -> "$name\nWindows PE detected: machine 0x" + pe.machine.toString(16) + "\nSaved in app storage"
+                !pe.isWindowsPe -> "$name\nValid Windows PE file nahi hai."
+                pe.machine == 0x014c -> "$name\nWindows x86 (32-bit) EXE detected\nPrivate app storage mein saved"
+                pe.machine == 0x8664 -> "$name\nWindows x64 EXE detected\nARM32 target par supported nahi"
+                else -> "$name\nPE machine 0x" + pe.machine.toString(16) + "\nSupported x86 target nahi"
             }
-            Toast.makeText(this, if (pe.isWindowsPe) "Windows PE file copied successfully." else "File copied, but Windows PE header was not found.", Toast.LENGTH_LONG).show()
-        } catch (e: Exception) {
+            refreshRuntimeState()
+            Toast.makeText(
+                this,
+                if (pe.isWindowsPe) "EXE import complete." else "Windows PE header nahi mila.",
+                Toast.LENGTH_LONG
+            ).show()
+        } catch (error: Exception) {
             selectedExeFile = null
-            selectedExeLabel.text = "Could not import file: " + (e.message ?: "unknown error")
-            Toast.makeText(this, "Could not import selected file.", Toast.LENGTH_LONG).show()
+            selectedExeMachine = null
+            selectedExeLabel.text = "File import failed: ${error.message ?: "unknown error"}"
+            refreshRuntimeState()
+            Toast.makeText(this, "Selected file import nahi ho saki.", Toast.LENGTH_LONG).show()
         }
     }
 
@@ -138,21 +296,144 @@ class MainActivity : Activity() {
         return try {
             cursor = contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)
             if (cursor != null && cursor.moveToFirst()) cursor.getString(0) else null
-        } catch (_: Exception) { null } finally { cursor?.close() }
+        } catch (_: Exception) {
+            null
+        } finally {
+            cursor?.close()
+        }
     }
 
-    private fun showRuntimeStatus() {
-        runtimeStatus.text = nativeEngineStatus() +
-            "\n\nBox86: Android ARM32 build pipeline running" +
-            "\nARMHF root filesystem: not integrated" +
-            "\n32-bit Wine: not integrated" +
-            "\nGraphics/audio/input bridge: pending" +
-            "\nSelected EXE: " + (selectedExeFile?.name ?: "none")
-        Toast.makeText(this, "Runtime diagnostics updated.", Toast.LENGTH_SHORT).show()
+    private fun launchWindowsExe() {
+        val exe = selectedExeFile
+        if (exe == null || !exe.isFile || selectedExeMachine != 0x014c) {
+            Toast.makeText(this, "Pehle valid 32-bit x86 Windows EXE select karein.", Toast.LENGTH_LONG).show()
+            return
+        }
+        if (!runtimeManager.isReady()) {
+            Toast.makeText(this, "Pehle Windows runtime install karein.", Toast.LENGTH_LONG).show()
+            refreshRuntimeState()
+            return
+        }
+
+        try {
+            val proot = runtimeManager.prootBinary
+            val rootfs = runtimeManager.rootfsDir
+            val windowsDir = File(filesDir, "windows")
+            val command = arrayListOf(
+                proot.absolutePath,
+                "--rootfs", rootfs.absolutePath,
+                "--bind", "/dev:/dev",
+                "--bind", "/proc:/proc",
+                "--bind", windowsDir.absolutePath + ":/mnt/saji",
+                "--cwd", "/",
+                "/usr/local/bin/saji-desktop",
+                "/mnt/saji/" + exe.name
+            )
+            processLog.setLength(0)
+            val builder = ProcessBuilder(command).redirectErrorStream(true)
+            builder.environment()["HOME"] = filesDir.absolutePath
+            builder.environment()["TMPDIR"] = cacheDir.absolutePath
+            builder.environment()["RUST_LOG"] = "info"
+            val process = builder.start()
+            runtimeProcess = process
+            Thread {
+                try {
+                    BufferedReader(InputStreamReader(process.inputStream)).use { reader ->
+                        while (true) {
+                            val line = reader.readLine() ?: break
+                            synchronized(processLog) {
+                                if (processLog.length > 12_000) processLog.delete(0, 4_000)
+                                processLog.append(line).append('\n')
+                            }
+                        }
+                    }
+                } catch (_: Exception) {
+                }
+            }.start()
+
+            refreshRuntimeState()
+            runtimeStatus.text = "PRoot start ho gaya. Desktop server ready check ho raha hai…"
+            worker.execute {
+                var ready = false
+                for (attempt in 0 until 40) {
+                    if (!process.isAlive) break
+                    try {
+                        Socket().use { socket ->
+                            socket.connect(InetSocketAddress("127.0.0.1", 6080), 500)
+                            ready = true
+                        }
+                        if (ready) break
+                    } catch (_: Exception) {
+                    }
+                    Thread.sleep(500)
+                }
+                runOnUiThread {
+                    if (ready && process.isAlive) {
+                        desktopView.visibility = View.VISIBLE
+                        desktopView.loadUrl(
+                            "http://127.0.0.1:6080/vnc.html?host=127.0.0.1&port=6080&autoconnect=true&resize=scale"
+                        )
+                        runtimeStatus.text = "Windows desktop session running. Touch aur keyboard noVNC ke through forward honge."
+                        refreshRuntimeState()
+                    } else {
+                        val detail = synchronized(processLog) { processLog.toString().takeLast(900) }
+                        runtimeStatus.text = "Desktop start nahi hua. PRoot/Wine log: $detail"
+                        refreshRuntimeState()
+                    }
+                }
+            }
+        } catch (error: Exception) {
+            runtimeStatus.text = "Launch failed: ${error.message ?: "unknown error"}"
+            refreshRuntimeState()
+        }
+    }
+
+    private fun stopDesktopSession() {
+        val process = runtimeProcess
+        runtimeProcess = null
+        desktopView.stopLoading()
+        desktopView.loadUrl("about:blank")
+        desktopView.visibility = View.GONE
+        if (process != null) {
+            worker.execute {
+                try {
+                    process.destroy()
+                    if (!process.waitFor(3, java.util.concurrent.TimeUnit.SECONDS)) {
+                        process.destroyForcibly()
+                    }
+                } catch (_: Exception) {
+                    process.destroyForcibly()
+                }
+                runOnUiThread {
+                    runtimeStatus.text = "Desktop session stopped."
+                    refreshRuntimeState()
+                }
+            }
+        } else {
+            refreshRuntimeState()
+        }
+    }
+
+    override fun onBackPressed() {
+        if (::desktopView.isInitialized && desktopView.visibility == View.VISIBLE) {
+            desktopView.visibility = View.GONE
+            return
+        }
+        super.onBackPressed()
+    }
+
+    override fun onDestroy() {
+        runtimeProcess?.destroy()
+        worker.shutdownNow()
+        if (::desktopView.isInitialized) desktopView.destroy()
+        super.onDestroy()
     }
 
     companion object {
         private const val REQUEST_EXE = 4102
-        init { System.loadLibrary("sajipc") }
+
+        init {
+            System.loadLibrary("sajipc")
+        }
     }
 }
