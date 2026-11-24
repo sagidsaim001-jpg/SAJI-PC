@@ -35,6 +35,7 @@ class MainActivity : Activity() {
     private lateinit var runtimeStatus: TextView
     private lateinit var selectedExeLabel: TextView
     private lateinit var desktopView: WebView
+    private lateinit var menuScroll: ScrollView
     private lateinit var installButton: Button
     private lateinit var launchButton: Button
     private lateinit var stopButton: Button
@@ -60,7 +61,7 @@ class MainActivity : Activity() {
             setPadding(dp(14), dp(12), dp(14), dp(8))
         }
 
-        val scroll = ScrollView(this)
+        menuScroll = ScrollView(this)
         val panel = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER_HORIZONTAL
@@ -109,6 +110,8 @@ class MainActivity : Activity() {
         stopButton.isEnabled = false
         hideDesktopButton = makeButton("Hide Desktop View") {
             desktopView.visibility = View.GONE
+            menuScroll.visibility = View.VISIBLE
+            hideDesktopButton.visibility = View.GONE
         }
 
         val note = TextView(this).apply {
@@ -127,13 +130,15 @@ class MainActivity : Activity() {
         panel.addView(selectedExeLabel)
         panel.addView(launchButton, fullWidthParams())
         panel.addView(stopButton, fullWidthParams())
-        panel.addView(hideDesktopButton, fullWidthParams())
         panel.addView(note)
-        scroll.addView(panel)
-        root.addView(scroll, LinearLayout.LayoutParams(
+        menuScroll.addView(panel)
+        root.addView(menuScroll, LinearLayout.LayoutParams(
             LinearLayout.LayoutParams.MATCH_PARENT,
-            LinearLayout.LayoutParams.WRAP_CONTENT
+            0,
+            1f
         ))
+        hideDesktopButton.visibility = View.GONE
+        root.addView(hideDesktopButton, fullWidthParams())
 
         desktopView = WebView(this).apply {
             visibility = View.GONE
@@ -369,6 +374,8 @@ class MainActivity : Activity() {
                 }
                 runOnUiThread {
                     if (ready && process.isAlive) {
+                        menuScroll.visibility = View.GONE
+                        hideDesktopButton.visibility = View.VISIBLE
                         desktopView.visibility = View.VISIBLE
                         desktopView.loadUrl(
                             "http://127.0.0.1:6080/vnc.html?host=127.0.0.1&port=6080&autoconnect=true&resize=scale"
@@ -394,6 +401,8 @@ class MainActivity : Activity() {
         desktopView.stopLoading()
         desktopView.loadUrl("about:blank")
         desktopView.visibility = View.GONE
+        menuScroll.visibility = View.VISIBLE
+        hideDesktopButton.visibility = View.GONE
         if (process != null) {
             worker.execute {
                 try {
@@ -417,6 +426,8 @@ class MainActivity : Activity() {
     override fun onBackPressed() {
         if (::desktopView.isInitialized && desktopView.visibility == View.VISIBLE) {
             desktopView.visibility = View.GONE
+            menuScroll.visibility = View.VISIBLE
+            hideDesktopButton.visibility = View.GONE
             return
         }
         super.onBackPressed()
