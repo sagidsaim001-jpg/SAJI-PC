@@ -105,7 +105,10 @@ jobs:
           }
           trap cleanup EXIT INT TERM
           sleep 2
-          exec /usr/local/bin/box86 /usr/lib/wine/wine "$@"
+          set +e
+          /usr/local/bin/box86 /usr/lib/wine/wine "$@"
+          WINE_EXIT=$?
+          exit "$WINE_EXIT"
           EOF
           sudo chmod 0755 runtime-rootfs/usr/local/bin/saji-desktop
           sudo rm -f runtime-rootfs/usr/bin/qemu-arm-static
