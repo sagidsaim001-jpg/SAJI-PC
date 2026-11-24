@@ -68,7 +68,7 @@ jobs:
             ca-certificates locales tzdata \
             libc6:armhf libstdc++6:armhf \
             wine32:i386 libwine:i386 fonts-wine \
-            xvfb x11vnc xauth fonts-dejavu-core \
+            xvfb x11vnc xauth novnc websockify fonts-dejavu-core \
             libx11-6:armhf libxext6:armhf libxrender1:armhf \
             libasound2t64:armhf libpulse0:armhf
           sudo mkdir -p runtime-rootfs/usr/local/bin
@@ -82,6 +82,32 @@ jobs:
           exec /usr/local/bin/box86 /usr/lib/wine/wine "$@"
           EOF
           sudo chmod 0755 runtime-rootfs/usr/local/bin/saji-wine
+          sudo tee runtime-rootfs/usr/local/bin/saji-desktop >/dev/null <<'EOF'
+          #!/bin/sh
+          set -eu
+          export HOME=/home/saji
+          export DISPLAY=:0
+          export WINEPREFIX=/home/saji/.wine
+          export WINEARCH=win32
+          export WINEDEBUG=-all
+          export BOX86_LD_LIBRARY_PATH=/usr/lib/i386-linux-gnu:/lib/i386-linux-gnu:/usr/lib/wine
+          export BOX86_PATH=/usr/lib/wine
+          export BOX86_NOBANNER=1
+          mkdir -p "$HOME"
+          Xvfb :0 -screen 0 1280x720x24 -ac -nolisten tcp >/var/log/saji-xvfb.log 2>&1 &
+          XVFB_PID=$!
+          x11vnc -display :0 -localhost -nopw -forever -shared -rfbport 5900 -quiet >/var/log/saji-x11vnc.log 2>&1 &
+          VNC_PID=$!
+          websockify --web=/usr/share/novnc --heartbeat=30 6080 127.0.0.1:5900 >/var/log/saji-websockify.log 2>&1 &
+          WS_PID=$!
+          cleanup() {
+            kill "$WS_PID" "$VNC_PID" "$XVFB_PID" 2>/dev/null || true
+          }
+          trap cleanup EXIT INT TERM
+          sleep 2
+          exec /usr/local/bin/box86 /usr/lib/wine/wine "$@"
+          EOF
+          sudo chmod 0755 runtime-rootfs/usr/local/bin/saji-desktop
           sudo rm -f runtime-rootfs/usr/bin/qemu-arm-static
           sudo chroot runtime-rootfs dpkg-query -W -f='${binary:Package} ${Version} ${Architecture}\n' | sort | sudo tee runtime-rootfs/SAJI-PC-PACKAGES.txt
 
@@ -93,6 +119,9 @@ jobs:
           readelf -h runtime-rootfs/usr/lib/wine/wine | grep -E 'Class:|Machine:'
           test -x runtime-rootfs/usr/bin/Xvfb
           test -x runtime-rootfs/usr/bin/x11vnc
+          test -x runtime-rootfs/usr/bin/websockify
+          test -f runtime-rootfs/usr/share/novnc/vnc.html
+          test -x runtime-rootfs/usr/local/bin/saji-desktop
           grep -q 'wine32:i386' runtime-rootfs/SAJI-PC-PACKAGES.txt
           grep -q 'libwine:i386' runtime-rootfs/SAJI-PC-PACKAGES.txt
           mkdir -p runtime-bundle
