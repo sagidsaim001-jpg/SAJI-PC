@@ -115,8 +115,14 @@ jobs:
           sudo mkdir -p runtime-rootfs/home/saji runtime-rootfs/tmp
           sudo chmod 0777 runtime-rootfs/home/saji
           sudo chmod 1777 runtime-rootfs/tmp
-          sudo rm -f runtime-rootfs/usr/bin/qemu-arm-static
           sudo chroot runtime-rootfs dpkg-query -W -f='${binary:Package} ${Version} ${Architecture}\n' | sort | sudo tee runtime-rootfs/SAJI-PC-PACKAGES.txt
+
+      - name: Smoke-test ARMHF Box86 and 32-bit Wine under QEMU
+        run: |
+          sudo chroot runtime-rootfs /usr/local/bin/box86 --version
+          sudo chroot runtime-rootfs env BOX86_NOBANNER=1 BOX86_DYNAREC=0 \
+            /usr/local/bin/box86 /usr/lib/wine/wine --version
+          sudo rm -f runtime-rootfs/usr/bin/qemu-arm-static
 
       - name: Verify runtime architecture and key files
         run: |
