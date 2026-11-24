@@ -49,7 +49,7 @@ jobs:
           cmake -S box86-src -B build/box86 \
             -DCMAKE_TOOLCHAIN_FILE="$ANDROID_NDK_HOME/build/cmake/android.toolchain.cmake" \
             -DANDROID_ABI=armeabi-v7a \
-            -DANDROID_PLATFORM=26 \
+            -DANDROID_PLATFORM=28 \
             -DANDROID=ON \
             -DNOGIT=ON \
             -DNO_CONF_INSTALL=ON \
