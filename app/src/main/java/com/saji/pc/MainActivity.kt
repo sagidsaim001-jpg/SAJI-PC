@@ -38,6 +38,8 @@ class MainActivity : Activity() {
     private lateinit var desktopView: WebView
     private lateinit var menuScroll: ScrollView
     private lateinit var installButton: Button
+    private lateinit var downloadRuntimeButton: Button
+    private lateinit var importRuntimeButton: Button
     private lateinit var testRuntimeButton: Button
     private lateinit var launchButton: Button
     private lateinit var installedAppsButton: Button
@@ -96,6 +98,12 @@ class MainActivity : Activity() {
         installButton = makeButton("Install / Update Windows Runtime") {
             installRuntime()
         }
+        downloadRuntimeButton = makeButton("Open Runtime Download Page") {
+            openRuntimeDownloadPage()
+        }
+        importRuntimeButton = makeButton("Import Downloaded Runtime ZIP") {
+            openRuntimeZipPicker()
+        }
         val selectButton = makeButton("Select Windows EXE") {
             openExePicker()
         }
@@ -140,6 +148,8 @@ class MainActivity : Activity() {
         panel.addView(subtitle)
         panel.addView(runtimeStatus)
         panel.addView(installButton, fullWidthParams())
+        panel.addView(downloadRuntimeButton, fullWidthParams())
+        panel.addView(importRuntimeButton, fullWidthParams())
         panel.addView(selectButton, fullWidthParams())
         panel.addView(selectedExeLabel)
         panel.addView(testRuntimeButton, fullWidthParams())
@@ -202,6 +212,8 @@ class MainActivity : Activity() {
             nativeEngineStatus() + "\nWindows runtime not installed"
         }
         installButton.isEnabled = runtimeProcess?.isAlive != true
+        downloadRuntimeButton.isEnabled = runtimeProcess?.isAlive != true
+        importRuntimeButton.isEnabled = runtimeProcess?.isAlive != true
         testRuntimeButton.isEnabled = ready && runtimeProcess?.isAlive != true
         launchButton.isEnabled = ready && runtimeTestPassed &&
             selectedExeFile?.isFile == true &&
@@ -220,22 +232,80 @@ class MainActivity : Activity() {
         launchButton.isEnabled = false
         runtimeTestPassed = false
         runtimeTestMessage = "Runtime install complete hone ke baad device test required hai."
-        runtimeStatus.text = "Runtime manifest check ho raha hai…"
+        runtimeStatus.text = "Latest runtime check ho raha hai..."
         worker.execute {
             try {
                 runtimeManager.install { message ->
                     runOnUiThread { runtimeStatus.text = message }
                 }
                 runOnUiThread {
-                    runtimeStatus.text = "Windows runtime installed. 32-bit EXE select karke launch karein."
+                    runtimeTestPassed = false
+                    runtimeTestMessage = "Runtime installed. Device self-test running..."
                     refreshRuntimeState()
-                    Toast.makeText(this, "Runtime installation complete.", Toast.LENGTH_LONG).show()
+                    verifyRuntime()
+                    Toast.makeText(this, "Runtime installed. Phone test start ho raha hai.", Toast.LENGTH_LONG).show()
                 }
             } catch (error: Exception) {
                 runOnUiThread {
-                    runtimeStatus.text = "Runtime install failed: ${error.message ?: "unknown error"}"
+                    runtimeStatus.text = "Automatic download failed: " + (error.message ?: "unknown error")
                     refreshRuntimeState()
-                    Toast.makeText(this, "Runtime install failed. Details status mein hain.", Toast.LENGTH_LONG).show()
+                    Toast.makeText(
+                        this,
+                        "GitHub se ZIP download karke Import Downloaded Runtime ZIP use karein.",
+                        Toast.LENGTH_LONG
+                    ).show()
+                }
+            }
+        }
+    }
+
+    private fun openRuntimeDownloadPage() {
+        val url = Uri.parse(
+            "https://github.com/sagidsaim001-jpg/SAJI-PC/actions/workflows/armhf-wine-runtime.yml"
+        )
+        startActivity(Intent(Intent.ACTION_VIEW, url))
+    }
+
+    private fun openRuntimeZipPicker() {
+        val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+            addCategory(Intent.CATEGORY_OPENABLE)
+            type = "application/zip"
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+        startActivityForResult(intent, REQUEST_RUNTIME_ZIP)
+    }
+
+    private fun importRuntimeFromUri(uri: Uri) {
+        if (runtimeProcess?.isAlive == true) {
+            Toast.makeText(this, "Pehle desktop session stop karein.", Toast.LENGTH_LONG).show()
+            return
+        }
+        installButton.isEnabled = false
+        importRuntimeButton.isEnabled = false
+        launchButton.isEnabled = false
+        runtimeTestPassed = false
+        runtimeTestMessage = "Imported runtime ki verification chal rahi hai..."
+        worker.execute {
+            try {
+                val input = contentResolver.openInputStream(uri)
+                    ?: throw IllegalStateException("Selected runtime ZIP open nahi hui.")
+                input.use { stream ->
+                    runtimeManager.installFromStream(stream) { message ->
+                        runOnUiThread { runtimeStatus.text = message }
+                    }
+                }
+                runOnUiThread {
+                    runtimeTestPassed = false
+                    runtimeTestMessage = "Runtime imported. Device self-test running..."
+                    refreshRuntimeState()
+                    verifyRuntime()
+                    Toast.makeText(this, "Runtime import complete. Device test start ho raha hai.", Toast.LENGTH_LONG).show()
+                }
+            } catch (error: Exception) {
+                runOnUiThread {
+                    runtimeStatus.text = "Runtime ZIP import failed: " + (error.message ?: "unknown error")
+                    refreshRuntimeState()
+                    Toast.makeText(this, "Runtime ZIP verify/install nahi hui.", Toast.LENGTH_LONG).show()
                 }
             }
         }
@@ -342,8 +412,15 @@ class MainActivity : Activity() {
     @Deprecated("Deprecated API retained for platform compatibility")
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
-        if (requestCode != REQUEST_EXE || resultCode != RESULT_OK) return
+        if (resultCode != RESULT_OK) return
         val uri = data?.data ?: return
+
+        if (requestCode == REQUEST_RUNTIME_ZIP) {
+            importRuntimeFromUri(uri)
+            return
+        }
+        if (requestCode != REQUEST_EXE) return
+
         try {
             contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
         } catch (_: SecurityException) {
@@ -367,7 +444,7 @@ class MainActivity : Activity() {
         } catch (error: Exception) {
             selectedExeFile = null
             selectedExeMachine = null
-            selectedExeLabel.text = "File import failed: ${error.message ?: "unknown error"}"
+            selectedExeLabel.text = "File import failed: " + (error.message ?: "unknown error")
             refreshRuntimeState()
             Toast.makeText(this, "Selected file import nahi ho saki.", Toast.LENGTH_LONG).show()
         }
@@ -610,6 +687,7 @@ class MainActivity : Activity() {
 
     companion object {
         private const val REQUEST_EXE = 4102
+        private const val REQUEST_RUNTIME_ZIP = 4103
 
         init {
             System.loadLibrary("sajipc")
