@@ -1,30 +1,36 @@
 # SAJI PC
 
-An experimental Android ARM32 project intended to host a 32-bit Windows application compatibility stack.
+Experimental ARM32 Android project for running compatible 32-bit x86 Windows applications.
 
-## Current status
+## Honest status
 
-This is the initial Android starter shell, **not a working Windows emulator yet**.
+This repository is under active runtime development. The existing APK is currently a launcher and EXE-import shell; it is **not yet a working Windows emulator**. Do not use the APK build badge or a successful Android build as proof that Windows software already runs.
 
-Included:
-- Android application shell
-- ARM32-only ABI filter: `armeabi-v7a`
-- Native C++ JNI library stub
-- GitHub Actions workflow to build and upload a debug APK
+Implemented in the Android shell:
+- ARM32-only APK target (armeabi-v7a)
+- Android Storage Access Framework EXE import
+- Private app-storage copy
+- Windows PE signature and machine-type inspection
+- Launch remains disabled until a real runtime passes verification
 
-Not integrated yet:
-- Box86
-- 32-bit Wine
-- ARMHF userspace/runtime
-- graphics, audio, input and filesystem integration
-- Windows EXE installer/launcher
+Runtime build pipelines:
+- ARMHF Debian root filesystem with i386 Wine32, Xvfb and x11vnc
+- Box86 cross-build for ARMHF Linux userspace
+- PRoot-rs cross-build for Android ARM32
+- Android ARM32 APK build
 
-## Planned architecture
+The runtime pipelines are still being verified. Their artifacts are not yet integrated into the APK, and they have not been tested on the target phone.
 
-Android ARM32 app -> ARMHF userspace -> Box86 -> 32-bit Wine -> Windows x86 application.
+## Intended compatibility
 
-Each runtime component must be integrated from its upstream source with license notices, reproducible build steps, and device testing.
+The first target is 32-bit x86 Windows PE software that works with Wine. x64 Windows applications are outside this ARM32 build's scope. Wine compatibility varies by application; no claim is made that every Windows program will run.
 
-## Build
+## Planned runtime architecture
 
-GitHub Actions runs `gradle assembleDebug` and uploads the APK as an artifact named `SAJI-PC-ARM32-debug`.
+Android ARM32 app -> Android ARM32 PRoot -> Debian ARMHF/glibc rootfs -> ARMHF Box86 -> i386 Wine32 -> Windows x86 PE application.
+
+For the first desktop path, Xvfb and x11vnc provide an X11 display that can be shown in an Android viewer. Audio, input, lifecycle, installation and device-specific behavior still need integration and testing.
+
+## Build artifacts
+
+GitHub Actions publishes debug APK and runtime component artifacts. Open the repository's Actions tab and select a successful run's Artifacts section. A successful APK build only verifies the Android shell and does not prove Windows EXE execution.
