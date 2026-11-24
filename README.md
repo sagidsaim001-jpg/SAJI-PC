@@ -1,36 +1,43 @@
 # SAJI PC
 
-Experimental ARM32 Android project for running compatible 32-bit x86 Windows applications.
+SAJI PC is an experimental **ARM32 Android** compatibility environment for running selected **32-bit x86 Windows applications** through Wine.
 
-## Honest status
+## App capabilities in version 0.3.0
 
-This repository is under active runtime development. The existing APK is currently a launcher and EXE-import shell; it is **not yet a working Windows emulator**. Do not use the APK build badge or a successful Android build as proof that Windows software already runs.
+- ARM32-only Android APK (armeabi-v7a).
+- Windows EXE import through Android's document picker.
+- PE signature and architecture validation. Only x86 / 32-bit Windows PE is accepted for launch.
+- First-run runtime installer with SHA-256 verification, available-storage checks and guarded tar extraction.
+- Runtime manager for Debian ARMHF, Box86, i386 Wine32 and Android ARM32 PRoot.
+- Desktop view planned through Xvfb, x11vnc and noVNC in an Android WebView.
+- Start/stop desktop session and display runtime/launch errors.
 
-Implemented in the Android shell:
-- ARM32-only APK target (armeabi-v7a)
-- Android Storage Access Framework EXE import
-- Private app-storage copy
-- Windows PE signature and machine-type inspection
-- Launch remains disabled until a real runtime passes verification
-
-Runtime build pipelines:
-- ARMHF Debian root filesystem with i386 Wine32, Xvfb and x11vnc
-- Box86 cross-build for ARMHF Linux userspace
-- PRoot-rs cross-build for Android ARM32
-- Android ARM32 APK build
-
-The runtime pipelines are still being verified. Their artifacts are not yet integrated into the APK, and they have not been tested on the target phone.
-
-## Intended compatibility
-
-The first target is 32-bit x86 Windows PE software that works with Wine. x64 Windows applications are outside this ARM32 build's scope. Wine compatibility varies by application; no claim is made that every Windows program will run.
-
-## Planned runtime architecture
+## Intended runtime
 
 Android ARM32 app -> Android ARM32 PRoot -> Debian ARMHF/glibc rootfs -> ARMHF Box86 -> i386 Wine32 -> Windows x86 PE application.
 
-For the first desktop path, Xvfb and x11vnc provide an X11 display that can be shown in an Android viewer. Audio, input, lifecycle, installation and device-specific behavior still need integration and testing.
+Box86 translates x86 Linux userspace. Wine provides the Windows compatibility layer. The first desktop implementation uses a virtual X11 display and noVNC. Audio forwarding and hardware-accelerated graphics are not implemented yet.
 
-## Build artifacts
+## Build and runtime status
 
-GitHub Actions publishes debug APK and runtime component artifacts. Open the repository's Actions tab and select a successful run's Artifacts section. A successful APK build only verifies the Android shell and does not prove Windows EXE execution.
+The Android app including the importer, runtime installer and launch UI has compiled successfully in GitHub Actions. The APK build result verifies Android code only.
+
+Separate CI workflows are building:
+- Android ARM32 PRoot-rs and its loader shim.
+- Debian Trixie ARMHF root filesystem.
+- Box86 built for ARMHF Linux/glibc.
+- i386 Wine32, Xvfb, x11vnc and noVNC runtime packages.
+- Runtime artifacts and a signed-by-checksum download manifest.
+
+The runtime components are not yet all verified, published and tested together on a physical Android 13 ARM32 device. Until those gates pass, this repository must not be described as a completed Windows emulator.
+
+## Compatibility limits
+
+- This build targets 32-bit x86 Windows applications only. Windows x64 programs are out of scope.
+- Wine compatibility varies by application. Some software needs Windows APIs, graphics, drivers, services or .NET features that may not be available.
+- Software requiring DirectX hardware acceleration, kernel drivers, anti-cheat, or unsupported APIs may not work.
+- Performance depends on the phone's ARM CPU, RAM and the amount of x86 translation required.
+
+## GitHub Actions
+
+Open the repository's Actions tab to inspect the latest ARM32 APK and runtime build jobs. APK build success is not proof that Windows software executes; the runtime and device smoke tests are separate gates.
