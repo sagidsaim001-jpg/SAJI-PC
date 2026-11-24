@@ -1,0 +1,73 @@
+name: Box86 Android ARM32 runtime build
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/box86-android-arm32.yml"
+      - "runtime/**"
+
+permissions:
+  contents: read
+
+jobs:
+  box86-android-arm32:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout SAJI PC
+        uses: actions/checkout@v4
+
+      - name: Set up JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android NDK and build tools
+        run: |
+          sdkmanager "ndk;27.2.12479018" "cmake;3.22.1"
+          echo "ANDROID_NDK_HOME=$ANDROID_SDK_ROOT/ndk/27.2.12479018" >> "$GITHUB_ENV"
+
+      - name: Fetch pinned Box86 source
+        run: |
+          git clone https://github.com/ptitSeb/box86.git box86-src
+          git -C box86-src checkout bb716a2a6576cc06da811bf55e31e2f6f03b7596
+          git -C box86-src rev-parse HEAD
+
+      - name: Configure Box86 for Android ARM32
+        run: |
+          cmake -S box86-src -B build/box86 \
+            -DCMAKE_TOOLCHAIN_FILE="$ANDROID_NDK_HOME/build/cmake/android.toolchain.cmake" \
+            -DANDROID_ABI=armeabi-v7a \
+            -DANDROID_PLATFORM=26 \
+            -DANDROID=ON \
+            -DNOGIT=ON \
+            -DNO_CONF_INSTALL=ON \
+            -DNO_LIB_INSTALL=ON \
+            -DCMAKE_BUILD_TYPE=Release
+
+      - name: Compile Box86
+        run: cmake --build build/box86 --parallel 2
+
+      - name: Locate and verify Box86 binary
+        run: |
+          find build/box86 -type f -name box86 -print
+          BOX86_BIN="$(find build/box86 -type f -name box86 -perm -111 | head -n 1)"
+          test -n "$BOX86_BIN"
+          file "$BOX86_BIN"
+          mkdir -p runtime-artifact
+          cp "$BOX86_BIN" runtime-artifact/box86
+          sha256sum runtime-artifact/box86
+
+      - name: Upload Box86 ARM32 build
+        uses: actions/upload-artifact@v4
+        with:
+          name: SAJI-PC-Box86-Android-ARM32
+          path: runtime-artifact/box86
+          if-no-files-found: error
+          retention-days: 30
