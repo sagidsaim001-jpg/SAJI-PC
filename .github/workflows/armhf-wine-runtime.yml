@@ -1,0 +1,112 @@
+name: SAJI PC ARMHF Linux + x86 Wine runtime bundle
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/armhf-wine-runtime.yml"
+      - "runtime/**"
+
+permissions:
+  contents: read
+
+jobs:
+  build-armhf-wine-rootfs:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - name: Checkout SAJI PC
+        uses: actions/checkout@v4
+
+      - name: Install cross-build and rootfs tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            cmake ninja-build git python3 file binutils \
+            gcc-arm-linux-gnueabihf g++-arm-linux-gnueabihf \
+            debootstrap qemu-user-static binfmt-support xz-utils
+
+      - name: Build Box86 for ARMHF Linux userspace
+        run: |
+          git clone https://github.com/ptitSeb/box86.git box86-src
+          git -C box86-src checkout bb716a2a6576cc06da811bf55e31e2f6f03b7596
+          cmake -S box86-src -B build/box86 -G Ninja \
+            -DCMAKE_SYSTEM_NAME=Linux \
+            -DCMAKE_SYSTEM_PROCESSOR=arm \
+            -DCMAKE_C_COMPILER=arm-linux-gnueabihf-gcc \
+            -DCMAKE_ASM_COMPILER=arm-linux-gnueabihf-gcc \
+            -DCMAKE_C_FLAGS="-O2 -marm -march=armv7-a -mfpu=neon -mfloat-abi=hard" \
+            -DCMAKE_ASM_FLAGS="-marm -march=armv7-a -mfpu=neon -mfloat-abi=hard" \
+            -DARM_DYNAREC=ON \
+            -DNOGIT=ON \
+            -DNO_CONF_INSTALL=ON \
+            -DNO_LIB_INSTALL=ON \
+            -DCMAKE_BUILD_TYPE=Release
+          cmake --build build/box86 --parallel 2
+          BOX86_BIN="$(find build/box86 -type f -name box86 -perm -111 | head -n 1)"
+          test -n "$BOX86_BIN"
+          file "$BOX86_BIN"
+          readelf -h "$BOX86_BIN" | grep -E 'Class:|Machine:'
+          mkdir -p runtime-stage/usr/local/bin
+          install -m 0755 "$BOX86_BIN" runtime-stage/usr/local/bin/box86
+
+      - name: Bootstrap Debian Trixie ARMHF root filesystem
+        run: |
+          sudo debootstrap --arch=armhf --foreign --variant=minbase \
+            trixie runtime-rootfs https://deb.debian.org/debian
+          sudo cp /usr/bin/qemu-arm-static runtime-rootfs/usr/bin/qemu-arm-static
+          sudo chroot runtime-rootfs /debootstrap/debootstrap --second-stage
+          echo "deb https://deb.debian.org/debian trixie main" | sudo tee runtime-rootfs/etc/apt/sources.list
+          sudo chroot runtime-rootfs apt-get update
+
+      - name: Install i386 Wine, ARMHF desktop server and runtime libraries
+        run: |
+          sudo chroot runtime-rootfs dpkg --add-architecture i386
+          sudo chroot runtime-rootfs apt-get update
+          sudo chroot runtime-rootfs env DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+            ca-certificates locales tzdata \
+            libc6:armhf libstdc++6:armhf \
+            wine32:i386 libwine:i386 fonts-wine \
+            xvfb x11vnc xauth fonts-dejavu-core \
+            libx11-6:armhf libxext6:armhf libxrender1:armhf \
+            libasound2:armhf libpulse0:armhf
+          sudo mkdir -p runtime-rootfs/usr/local/bin
+          sudo install -m 0755 runtime-stage/usr/local/bin/box86 runtime-rootfs/usr/local/bin/box86
+          sudo tee runtime-rootfs/usr/local/bin/saji-wine >/dev/null <<'EOF'
+          #!/bin/sh
+          ROOT=/usr/lib/i386-linux-gnu:/lib/i386-linux-gnu
+          export BOX86_LD_LIBRARY_PATH="$ROOT"
+          export BOX86_PATH=/usr/lib/wine
+          export BOX86_NOBANNER=1
+          exec /usr/local/bin/box86 /usr/lib/wine/wine "$@"
+          EOF
+          sudo chmod 0755 runtime-rootfs/usr/local/bin/saji-wine
+          sudo rm -f runtime-rootfs/usr/bin/qemu-arm-static
+          sudo chroot runtime-rootfs dpkg-query -W -f='${binary:Package} ${Version} ${Architecture}\n' | sort | sudo tee runtime-rootfs/SAJI-PC-PACKAGES.txt
+
+      - name: Verify runtime architecture and key files
+        run: |
+          file runtime-rootfs/usr/local/bin/box86
+          file runtime-rootfs/usr/lib/wine/wine
+          readelf -h runtime-rootfs/usr/local/bin/box86 | grep -E 'Class:|Machine:'
+          readelf -h runtime-rootfs/usr/lib/wine/wine | grep -E 'Class:|Machine:'
+          test -x runtime-rootfs/usr/bin/Xvfb
+          test -x runtime-rootfs/usr/bin/x11vnc
+          grep -q 'wine32:i386' runtime-rootfs/SAJI-PC-PACKAGES.txt
+          grep -q 'libwine:i386' runtime-rootfs/SAJI-PC-PACKAGES.txt
+          mkdir -p runtime-bundle
+          sudo tar --numeric-owner --xattrs --acls \
+            --exclude='./proc/*' --exclude='./sys/*' --exclude='./dev/*' \
+            --exclude='./run/*' --exclude='./tmp/*' \
+            -C runtime-rootfs -czf runtime-bundle/SAJI-PC-ARMHF-Wine32-RootFS.tar.gz .
+          sha256sum runtime-bundle/SAJI-PC-ARMHF-Wine32-RootFS.tar.gz > runtime-bundle/SHA256SUMS
+          du -h runtime-bundle/SAJI-PC-ARMHF-Wine32-RootFS.tar.gz
+
+      - name: Upload ARMHF and Wine32 runtime bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: SAJI-PC-ARMHF-Wine32-RootFS
+          path: runtime-bundle/*
+          if-no-files-found: error
+          retention-days: 30
