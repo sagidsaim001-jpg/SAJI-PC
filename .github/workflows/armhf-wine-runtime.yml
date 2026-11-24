@@ -9,7 +9,7 @@ on:
       - "runtime/**"
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   build-armhf-wine-rootfs:
@@ -130,6 +130,25 @@ jobs:
             --exclude='./run/*' --exclude='./tmp/*' \
             -C runtime-rootfs -czf runtime-bundle/SAJI-PC-ARMHF-Wine32-RootFS.tar.gz .
           sha256sum runtime-bundle/SAJI-PC-ARMHF-Wine32-RootFS.tar.gz > runtime-bundle/SHA256SUMS
+          python3 - <<'PY'
+          import hashlib, json, os
+          archive = "runtime-bundle/SAJI-PC-ARMHF-Wine32-RootFS.tar.gz"
+          digest = hashlib.sha256(open(archive, "rb").read()).hexdigest()
+          manifest = {
+              "version": "debian-trixie-armhf-wine32",
+              "architecture": "armhf",
+              "windows_architecture": "x86",
+              "box86_revision": "bb716a2a6576cc06da811bf55e31e2f6f03b7596",
+              "wine_package": "wine32:i386",
+              "display": "Xvfb + x11vnc + noVNC",
+              "archive": "SAJI-PC-ARMHF-Wine32-RootFS.tar.gz",
+              "sha256": digest,
+              "size_bytes": os.path.getsize(archive),
+              "download_url": "https://github.com/sagidsaim001-jpg/SAJI-PC/releases/download/runtime-latest/SAJI-PC-ARMHF-Wine32-RootFS.tar.gz"
+          }
+          with open("runtime-bundle/runtime-manifest.json", "w") as f:
+              json.dump(manifest, f, indent=2)
+          PY
           du -h runtime-bundle/SAJI-PC-ARMHF-Wine32-RootFS.tar.gz
 
       - name: Upload ARMHF and Wine32 runtime bundle
@@ -139,3 +158,22 @@ jobs:
           path: runtime-bundle/*
           if-no-files-found: error
           retention-days: 30
+
+      - name: Publish stable runtime download release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if gh release view runtime-latest >/dev/null 2>&1; then
+            gh release upload runtime-latest \
+              runtime-bundle/SAJI-PC-ARMHF-Wine32-RootFS.tar.gz \
+              runtime-bundle/runtime-manifest.json \
+              runtime-bundle/SHA256SUMS --clobber
+          else
+            gh release create runtime-latest \
+              runtime-bundle/SAJI-PC-ARMHF-Wine32-RootFS.tar.gz \
+              runtime-bundle/runtime-manifest.json \
+              runtime-bundle/SHA256SUMS \
+              --title "SAJI PC ARMHF Wine32 Runtime" \
+              --notes "Debian ARMHF + Box86 + i386 Wine32 + noVNC runtime bundle." \
+              --prerelease --target "$GITHUB_SHA"
+          fi
