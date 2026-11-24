@@ -144,8 +144,10 @@ jobs:
               "archive": "SAJI-PC-ARMHF-Wine32-RootFS.tar.gz",
               "sha256": digest,
               "size_bytes": os.path.getsize(archive),
+              "uncompressed_bytes": int(__import__("subprocess").check_output(["du", "-sb", "runtime-rootfs"]).split()[0]),
               "download_url": "https://github.com/sagidsaim001-jpg/SAJI-PC/releases/download/runtime-latest/SAJI-PC-ARMHF-Wine32-RootFS.tar.gz",
-              "proot_download_url": "https://github.com/sagidsaim001-jpg/SAJI-PC/releases/download/proot-latest/SAJI-PC-PRoot-Android-ARM32.tar.gz"
+              "proot_download_url": "https://github.com/sagidsaim001-jpg/SAJI-PC/releases/download/proot-latest/SAJI-PC-PRoot-Android-ARM32.tar.gz",
+              "proot_checksum_url": "https://github.com/sagidsaim001-jpg/SAJI-PC/releases/download/proot-latest/PRoot-SHA256SUMS"
           }
           with open("runtime-bundle/runtime-manifest.json", "w") as f:
               json.dump(manifest, f, indent=2)
