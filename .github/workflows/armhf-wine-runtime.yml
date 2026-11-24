@@ -94,11 +94,11 @@ jobs:
           export BOX86_PATH=/usr/lib/wine
           export BOX86_NOBANNER=1
           mkdir -p "$HOME"
-          Xvfb :0 -screen 0 1280x720x24 -ac -nolisten tcp >/var/log/saji-xvfb.log 2>&1 &
+          Xvfb :0 -screen 0 1280x720x24 -ac -nolisten tcp >$HOME/.saji-xvfb.log 2>&1 &
           XVFB_PID=$!
-          x11vnc -display :0 -localhost -nopw -forever -shared -rfbport 5900 -quiet >/var/log/saji-x11vnc.log 2>&1 &
+          x11vnc -display :0 -localhost -nopw -forever -shared -rfbport 5900 -quiet >$HOME/.saji-x11vnc.log 2>&1 &
           VNC_PID=$!
-          websockify --web=/usr/share/novnc --heartbeat=30 6080 127.0.0.1:5900 >/var/log/saji-websockify.log 2>&1 &
+          websockify --web=/usr/share/novnc --heartbeat=30 6080 127.0.0.1:5900 >$HOME/.saji-websockify.log 2>&1 &
           WS_PID=$!
           cleanup() {
             kill "$WS_PID" "$VNC_PID" "$XVFB_PID" 2>/dev/null || true
