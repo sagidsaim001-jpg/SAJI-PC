@@ -70,7 +70,7 @@ jobs:
             wine32:i386 libwine:i386 fonts-wine \
             xvfb x11vnc xauth fonts-dejavu-core \
             libx11-6:armhf libxext6:armhf libxrender1:armhf \
-            libasound2:armhf libpulse0:armhf
+            libasound2t64:armhf libpulse0:armhf
           sudo mkdir -p runtime-rootfs/usr/local/bin
           sudo install -m 0755 runtime-stage/usr/local/bin/box86 runtime-rootfs/usr/local/bin/box86
           sudo tee runtime-rootfs/usr/local/bin/saji-wine >/dev/null <<'EOF'
